@@ -1,0 +1,87 @@
+{
+  "repository": "auto-charts",
+  "date": "2026-10-03",
+  "sources": [
+    {
+      "repo": "auto-lang",
+      "commit": "17292c07e792e80d4e4da5495fc3fc2917e8aa1e",
+      "path": "examples/ui/024-charts",
+      "primary": true,
+      "fileCount": 12,
+      "pacFields": {
+        "name": "charts",
+        "version": "0.1.0",
+        "description": "Charts playground - edit series, switch chart type, watch geometry recompute (vue/vm)",
+        "scene": "ui",
+        "render": "vue",
+        "title": "Charts",
+        "title_zh": "图表",
+        "front_port": "4024",
+        "desktop": "true"
+      },
+      "files": [
+        {
+          "sourcePath": "examples/ui/024-charts/SPEC.md",
+          "path": "SPEC.md",
+          "sha256": "70fcbbe64d1639de58b45efdc945c1f6d9b30f864086e4096cfb3334e3f2127a"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/pac.at",
+          "path": "pac.at",
+          "sha256": "99fb4adf1f22aeaa41f916b2c8baf351f1498dd0d93a89a3b75ab726eaa8299f"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/src/front/app.at",
+          "path": "src/front/app.at",
+          "sha256": "6c62b74bc5eaddada9945efd427ac9329f28c20d2eba4e0e845264fd2a7ea857"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/src/front/components/area_chart.at",
+          "path": "src/front/components/area_chart.at",
+          "sha256": "e0a175a93c44196303b3189b6124350c4e1d8ec50442215c48e5201847853754"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/src/front/components/bar_chart.at",
+          "path": "src/front/components/bar_chart.at",
+          "sha256": "8b619ac3161a8aab927e22d87fa50eae5cce9265daefc6ca24a984b7078eec73"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/src/front/components/chart_geom.at",
+          "path": "src/front/components/chart_geom.at",
+          "sha256": "78a02b598d169d0caa278a32aa913be1800ab76a02084a9c389f3ea64aa58863"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/src/front/components/donut_chart.at",
+          "path": "src/front/components/donut_chart.at",
+          "sha256": "39b30a5e7e6dd2a6dc299b27a56d7bf29fee7f350fef7d928df8ef1c6ef77048"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/src/front/components/line_chart.at",
+          "path": "src/front/components/line_chart.at",
+          "sha256": "7e0390893ecf9ce669ae4082652b07883ef09d7dad5c6f951c2616bcec56ba4b"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/src/front/components/package.at",
+          "path": "src/front/components/package.at",
+          "sha256": "935433152eb02cd69344b64e1a9514b0cd0aeedff2f3937f9a605eecf8729030"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/tests/desktop_mcp.py",
+          "path": "tests/desktop_mcp.py",
+          "sha256": "67a2b8a8269f2108846d5c360389316cd397b985636eb61a84c469fb6d73be64"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/tests/golden/donut_legend.txt",
+          "path": "tests/golden/donut_legend.txt",
+          "sha256": "97105e041f5953dfcf1c882e565280c11c432b55a710e26227e21452c1064c7d"
+        },
+        {
+          "sourcePath": "examples/ui/024-charts/tests/golden/stream_perf_sample.txt",
+          "path": "tests/golden/stream_perf_sample.txt",
+          "sha256": "63c4cf3806a8deea90befcf09c3101c62cadd7766883ed72cfbc04932344b8b9"
+        }
+      ]
+    }
+  ],
+  "note": "Exact committed source snapshots; packaging changes follow in a separate commit. References are not additional installed apps."
+}
