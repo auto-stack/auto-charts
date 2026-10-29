@@ -40,6 +40,8 @@ widget DonutChart (data: List, index: str = "l", field: str = "v", colors: List<
         d3 str = ""
         e3 str = ""
         hovDn int = 9
+        // 非空 = 数据不满足环形图契约（负值/零合计），view 显示提示不出几何
+        invalidMsg str = ""
         visDn0 bool = true
         visDn1 bool = true
         visDn2 bool = true
@@ -74,6 +76,38 @@ widget DonutChart (data: List, index: str = "l", field: str = "v", colors: List<
 
     on {
         .Init -> {
+            // ---- 第一遍守卫：环形图契约=非负数值且合计>0；截断整数
+            //      （G-8 同款字符串手术，避免 float→int 赋值中止 Init）----
+            var total0 int = 0
+            var minv int = 0
+            var seen bool = false
+            for d in .data {
+                var vs0 str = (d[.field]).to_string()
+                var dot0 int = vs0.find(".")
+                var vi0 int = 0
+                if dot0 >= 0 {
+                    vi0 = vs0.substr(0, dot0).to_int()
+                } else {
+                    vi0 = vs0.to_int()
+                }
+                total0 = total0 + vi0
+                if seen == false {
+                    minv = vi0
+                    seen = true
+                } else {
+                    if vi0 < minv {
+                        minv = vi0
+                    }
+                }
+            }
+            if minv < 0 {
+                .invalidMsg = "环形图需要非负数值（当前数据含负值），请改用柱状图"
+            } else {
+                if total0 <= 0 {
+                    .invalidMsg = "环形图需要正数值合计（当前合计为 0）"
+                }
+            }
+            if .invalidMsg == "" {
             // ---- 总量(占比分母) ----
             var total int = 0
             for d in .data {
@@ -126,7 +160,8 @@ widget DonutChart (data: List, index: str = "l", field: str = "v", colors: List<
                 }
                 var color = cs[ci]
                 // 图例项:labels[k] 优先回落 index 字段值;占比整数运算;槽位赋值(k<4)
-                var lv = d[iname]
+                var lv = (d[iname]).replace("
+", " ").replace("", " ")
                 var vi = d[.field]
                 var pct int = vi * 100 / total
                 var name = lv
@@ -167,6 +202,7 @@ widget DonutChart (data: List, index: str = "l", field: str = "v", colors: List<
             .tipBodies = outTipBody
             .endsDn = outEnds
             .cntDn = k
+            }
         }
 
         .Hover(i) -> {
@@ -266,9 +302,14 @@ widget DonutChart (data: List, index: str = "l", field: str = "v", colors: List<
 
     view {
         col (style: "w-full items-center gap-3") {
+            if .invalidMsg != "" {
+                text .invalidMsg { style: "text-sm text-destructive" }
+            }
             col (style: "relative") {
                 svg (viewBox: "150 20 260 260", style: "w-full h-auto max-w-md") {
+                    if .invalidMsg == "" {
                     circle (cx: "280", cy: "150", r: "100", fill: "none", stroke: "#f1f5f9", stroke-width: "38") {}
+                    }
                     if .d0 != "" {
                       if .visDn0 {
                         if .hovDn == 0 {
