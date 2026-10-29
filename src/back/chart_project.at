@@ -896,6 +896,8 @@ pub fn save_project(name str, source_path str, index_col int, v0 int, v1 int, v2
     doc = doc + ",\"created_at\":\"\""
     doc = doc + ",\"headers_frag\":\"" + csv.json_escape_cell(pt.headers_frag) + "\""
     doc = doc + ",\"rows_frag\":\"" + csv.json_escape_cell(rows_frag) + "\""
+    doc = doc + ",\"keys_frag\":\"" + csv.json_escape_cell(pt.keys_frag) + "\""
+    doc = doc + ",\"recs_frag\":\"" + csv.json_escape_cell(pt.recs_frag) + "\""
     doc = doc + ",\"row_count\":" + pt.row_count.to_string()
     doc = doc + ",\"col_count\":" + col_count + "}"
     var mk bool = fsx_mkdir_all(projects_dir())

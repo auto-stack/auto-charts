@@ -1,6 +1,9 @@
 
 # Independent app generated/runtime artifacts
+.auto/
 .am/
+build/
+deps/
 am.at
 gen/
 node_modules/

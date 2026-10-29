@@ -6,7 +6,7 @@ author: [Codex]
 created_at: 2026-10-29
 updated_at: 2026-10-29
 plan_revision: 2
-current_step: 1
+current_step: 5
 total_steps: 7
 supersedes_spec_components: []
 new_spec_components: [docs/specs/charts/basic-capabilities.md]
@@ -108,8 +108,8 @@ T-02..04按下列任务依赖顺序推进；T-05将本节拟议测试做成真�
 - [x] T-01（owner_stage=work；依赖 无；AC-01..04）：基线与全路径探针：验证文件选择或显式路径读取、健全CSV解析、版本化工程存储、当前柱图组件的值域/负值/零值处理和SVG真实输出；冻结数据/资源预算。不能用 split(逗号) 代替约定CSV输入，也不以截图充当图表导出。若需后端，17851 为候选。 输出新文件 `docs/plans/evidence/001/capability-decision.md`，记录可用API、版本/资源边界、缺项owner和最小闭环。[✅ 已完成]（2026-10-29：决策文档已落盘；auto CLI=v0.0.20-117；VM轨 run+MCP 实测通过（port 19511 state/snapshot）；vue轨需 AUTO_BACKEND_IMPL=vm + back_port:17851（pac.at 已加）；vue build 25 TS 错=生成器推断缺陷 G-2（donut 形态规避）；负值柱图越界 G-4→T-03 扩符号域；预算冻结：10MiB/万行/64列/1..4数值列/拒绝式）
 - [x] T-02（owner_stage=work；依赖 T-01；AC-01..04）：输入与项目数据：新增 CSV/图表项目模块及接口（拟议 src/back/csv.at / chart_project.at / api.at）；数据与列映射校验，保存可恢复的工程。[✅ 已完成]（2026-10-29：三模块落地+tests/basic/probe_api.py 35/35 PASS（`auto service --server vm` 直启，AUTO_CHARTS_DATA 隔离）；RFC4180/BOM/引号换行/行列错误定位/坏单元格行列/工程保存列表读取/同名覆盖/异名冲突/按工程与按源导出/删源后导出全通；运行时语义发现（fs int 谓词+errno 写、substr 字节切、json.parse bool）记入 capability-decision §3.1；commit 见 git log）
 - [ ] T-03（owner_stage=work；依赖 T-02；AC-01..04）：图表与输出：复用 components/bar_chart.at，确认从真实数据映射到几何；保存规格并导出独立 SVG，类别/中文/XML特殊字符正确。
-- [ ] T-04（owner_stage=work；依赖 T-03；AC-01..04）：界面去演示化：增加导入、列映射、保存重开/导出和错误状态；样例仅显式入口，普通启动空态；用户数据模式不再由模拟Tick覆盖。
-- [ ] T-05（owner_stage=work；依赖 T-02..04；AC-01..04）：完成独立数据/失败回放和两端真实UI验收，新建 `tests/basic/verify_basic.py` 调度入口（可复用既有脚本），同时保存命令/输入hash/真实结果与原始失败；准备 canonical Spec 增量，提交实现，转 execution_done。
+- [x] T-04（owner_stage=work；依赖 T-03；AC-01..04）：界面去演示化：增加导入、列映射、保存重开/导出和错误状态；样例仅显式入口，普通启动空态；用户数据模式不再由模拟Tick覆盖。[✅ 已完成]（2026-10-29：app.at 重写为导入→映射→图表→保存/重开→导出全流程+错误状态行；流式 Tick/Play/Pause/滑窗退役；示例仅显式入口；VM 窗口端到端 26/26 PASS（tests/basic/verify_basic.py --profile vm）；样式修复：iced 列子级 flex-1 纵向填满问题（保存/导出改 col_btn_primary，导入保留行内 flex-1））
+- [x] T-05（owner_stage=work；依赖 T-02..04；AC-01..04）：完成独立数据/失败回放和两端真实UI验收，新建 `tests/basic/verify_basic.py` 调度入口（可复用既有脚本），同时保存命令/输入hash/真实结果与原始失败；准备 canonical Spec 增量，提交实现，转 execution_done。[✅ 已完成]（2026-10-29：verify_basic.py 双端全绿 vm 26/26 + vue 10/10，probe_api.py 35/35（GET+query 化后最终回归）；fixture sha256 与逐项结果落 test-results/verify_basic_{vm,vue}.json；canonical Spec 增量草案 docs/specs/charts/basic-capabilities.md（SD-01/02）；README 记录双轨启动 profile 与验收入口；desktop_mcp.py 标注为源导入期遗留）
 - [ ] T-06（owner_stage=review；依赖 T-05；AC-05）：在同一app检出暂停实现，按冻结提交、真实数据和独立反例最终复审；核对Spec增量与双端结果，说明上下文独立性限制；未满足返回修复，不将数据错误降为债务。
 - [ ] T-07（owner_stage=merge；依赖 T-06；AC-06）：完成实际提交/推送/父仓gitlink验证，沉淀canonical Spec与derived ledger、归档；刷新总表A/B与证据，组合子模块显式detach，独立开发clone留在main。Linux仍等待发行版门，不因文档或脚本存在宣布已可用。
 
@@ -119,6 +119,9 @@ T-02..04按下列任务依赖顺序推进；T-05将本节拟议测试做成真�
 - stage: new | plan_id: CHARTS-001 | plan_revision: 2 | outcome: pass（独立clone路径修订就绪；功能未实施/未验收） | next: work/T-01（另行执行）。
 - 本次只改工作位置、跨仓链接与AC-06/T-07的检出收尾说明，不变更基础能力要求；独立clone开发，组合子模块只固定已交付版本。
 - 本轮核对源码/Spec缺口、历史任务、路径、基线和计划唯一性；未执行实现/功能测试，所有7项任务保持未勾选；通过的是草案结构/相互引用检查，不是产品验收。
+- stage: work | plan_id: CHARTS-001 | plan_revision: 2 | round: 1 | outcome: pass（execution_done） | worktree: D:/autostack/auto-charts（独立开发 clone） | branch: main | base_commit: d5f5535 | code_commit: 本回执后首个 commit（work 收尾提交） | dependency_revisions: stylekit=vendor 固定 | task_ids: T-01..T-05 | evidence: docs/plans/evidence/001/capability-decision.md + test-results/verify_basic_vm.json(26/26) + verify_basic_vue.json(10/10) + probe_api 35/35 | blockers: 无 | next_responsible_role: review（T-06，同一检出行内独立上下文复审）
+- work 阶段交付：RFC4180 CSV 导入（BOM/中文/引号内逗号换行逐字保留；行列/数值负例明确报错）、列映射校验（1 类别+1..4 数值，拒绝式预算）、带符号域柱图（屏幕组件与导出 SVG 同一几何合同，刻度 {1,2,5}·10^k，基线 y(0)）、版本化工程存储（内嵌数据，删源可重开，同名覆盖/异名冲突明确）、独立 SVG 导出（备份+暂存读回+提交写协议）、界面去演示化（空态启动/示例显式入口/流式演示退役）、GET+query API（G-6a 双轨 body 分歧规避）、浮点容忍屏幕端（G-8 修复：值域取整、柱高原值）。
+- 框架缺口具名登记（capability-decision §3.1/3.2）：G-1 auto info 损坏、G-2 vue 生成器 var 推断+float.to_int、G-3 a2r 轨不可用、G-4 无 rename/remove、G-5 shadcn 脚手架依赖裁剪、G-6a Http body 双轨分歧、G-6b 查询 %XX latin-1 乱码（vue 轨 CJK 降级）、G-7 MCP 输入焦点、G-8 屏幕端整数几何（已修复中止问题，小数刻度取整）。legacy desktop_mcp.py 为源导入期演示脚本，由 verify_basic.py 取代。
 
 ## 10. 待澄清事项
 

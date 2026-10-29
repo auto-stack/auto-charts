@@ -205,6 +205,75 @@ fn scan_one_record(t str, n int, start int) str {
 /// "rows_frag":"<转义JSON数组>","row_count":N,"col_count":C}——frag 为
 /// 转义后的 JSON 数组串，供工程文件以字符串字段内嵌（免动态容器重编码）；
 /// 失败：{"ok":false,"err_code":...}。
+/// 数值形态单元格（[+-]?digits[.digits]）→ recs 中以 JSON 数字输出
+/// （屏幕端组件按数值消费；存储面 rows_frag 保持逐字字符串）。
+fn is_number_cell(s str) bool {
+    var t str = s.trim()
+    var n int = t.len()
+    if n == 0 {
+        return false
+    }
+    var i int = 0
+    var c0 str = t.substr(0, 1)
+    if c0 == "+" {
+        i = 1
+    } else {
+        if c0 == "-" {
+            i = 1
+        }
+    }
+    var digits int = 0
+    var dots int = 0
+    while i < n {
+        var c str = t.substr(i, 1)
+        var dv int = -1
+        if c == "0" {
+            dv = 0
+        }
+        if c == "1" {
+            dv = 1
+        }
+        if c == "2" {
+            dv = 2
+        }
+        if c == "3" {
+            dv = 3
+        }
+        if c == "4" {
+            dv = 4
+        }
+        if c == "5" {
+            dv = 5
+        }
+        if c == "6" {
+            dv = 6
+        }
+        if c == "7" {
+            dv = 7
+        }
+        if c == "8" {
+            dv = 8
+        }
+        if c == "9" {
+            dv = 9
+        }
+        if dv >= 0 {
+            digits = digits + 1
+        } else {
+            if c == "." {
+                dots = dots + 1
+                if dots > 1 {
+                    return false
+                }
+            } else {
+                return false
+            }
+        }
+        i = i + 1
+    }
+    return digits > 0
+}
+
 pub fn parse_csv_parts(text str) str {
     var t str = text
     if t.trim() == "" {
@@ -290,7 +359,93 @@ pub fn parse_csv_parts(text str) str {
     var cc str = header_cols.to_string()
     var hf str = "[" + headers_frag + "]"
     var rf str = "[" + rows_frag + "]"
-    return "{\"ok\":true,\"headers_frag\":\"" + json_escape_cell(hf) + "\",\"rows_frag\":\"" + json_escape_cell(rf) + "\",\"row_count\":" + rc + ",\"col_count\":" + cc + "}"
+    // ---- 列键去重 + 对象行（屏幕端组件按 d[key] 动态取列）----
+    var keys List<str> = []
+    var ki int = 0
+    var headers = json.parse(hf)
+    for h in headers {
+        var base str = h
+        if base.trim() == "" {
+            base = "c" + ki.to_string()
+        }
+        var key str = base
+        var dup int = 2
+        var resolved bool = false
+        while resolved == false {
+            var cand str = base
+            if dup > 2 {
+                cand = base + "#" + dup.to_string()
+            }
+            var taken bool = false
+            for prev in keys {
+                if prev == cand {
+                    taken = true
+                }
+            }
+            if taken {
+                dup = dup + 1
+                if dup > 200 {
+                    key = "c" + ki.to_string()
+                    resolved = true
+                }
+            } else {
+                key = cand
+                resolved = true
+            }
+        }
+        keys.push(key)
+        ki = ki + 1
+    }
+    var keys_frag str = ""
+    var kj int = 0
+    for kk in keys {
+        var item str = "\"" + json_escape_cell(kk) + "\""
+        if kj == 0 {
+            keys_frag = item
+        } else {
+            keys_frag = keys_frag + "," + item
+        }
+        kj = kj + 1
+    }
+    keys_frag = "[" + keys_frag + "]"
+    var recs_frag str = ""
+    var ri int = 0
+    var rows = json.parse(rf)
+    for row in rows {
+        var rec str = "{"
+        var ci int = 0
+        for cell in row {
+            var kname str = "c" + ci.to_string()
+            var kc int = 0
+            for kk2 in keys {
+                if kc == ci {
+                    kname = kk2
+                }
+                kc = kc + 1
+            }
+            var item2 str = ""
+            if is_number_cell(cell) {
+                item2 = "\"" + json_escape_cell(kname) + "\":" + cell.trim()
+            } else {
+                item2 = "\"" + json_escape_cell(kname) + "\":\"" + json_escape_cell(cell) + "\""
+            }
+            if ci == 0 {
+                rec = rec + item2
+            } else {
+                rec = rec + "," + item2
+            }
+            ci = ci + 1
+        }
+        rec = rec + "}"
+        if ri == 0 {
+            recs_frag = rec
+        } else {
+            recs_frag = recs_frag + "," + rec
+        }
+        ri = ri + 1
+    }
+    recs_frag = "[" + recs_frag + "]"
+    return "{\"ok\":true,\"headers_frag\":\"" + json_escape_cell(hf) + "\",\"rows_frag\":\"" + json_escape_cell(rf) + "\",\"keys_frag\":\"" + json_escape_cell(keys_frag) + "\",\"recs_frag\":\"" + json_escape_cell(recs_frag) + "\",\"row_count\":" + rc + ",\"col_count\":" + cc + "}"
 }
 
 /// 解析入口（内联形态）。成功：{"ok":true,"headers":[...],"rows":[[...],...],

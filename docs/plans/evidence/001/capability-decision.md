@@ -46,6 +46,17 @@
 | `auto service --server vm` 每次启动**即时解析 src/back/api.at**（改码即生效，无需构建），7 路由注册 | 改 status 标记 v1→v1b 即时反映 | 探针/验收以 service 直启为准 |
 | `auto service` 缺省绑定 127.0.0.1:8080（AUTO_HTTP_PORT 不作用于该子命令） | 启动日志 | 探针脚本显式传 base_url |
 
+### 3.2 T-04 实测补充（VM 窗口 + vue 双轨驱动）
+
+| # | 发现 | 证据 | 处置 |
+|---|---|---|---|
+| G-6a | `Http.post(url, body)` 双轨 body 编码分歧：vue codegen 走 `JSON.stringify(实参)`（要**对象**），VM 轨改写为 `auto.http.post_json` 且 `VMConvertible→String` 对 map **只回内部槽位句柄**（固定值 `18443647848969734425`，与内容无关） | vue 诊断页 body 回显；VM 回显句柄 | app 侧全量改 **GET+query**（标量参数，reader get_chapter 同款）；owner：auto-lang（VM map→JSON 编码缺失） |
+| G-6b | 查询参数 `%XX` 解码按 **latin-1 逐字节**→ CJK 乱码（`%E6%8E%A2` → `æ¢`）；原始 UTF-8 字节直传正常 | 探针 percent 编码 CJK 工程名 → name 乱码；raw 直传正确 | 查询值仅编码 `%`/空格，CJK 走原始 UTF-8；owner：auto-lang（http_server query 解码）。影响：vue fetch 自动 percent-encode 非 ASCII → **vue 轨 CJK 路径/工程名降级**（VM 轨正常） |
+| G-7 | VM 窗口 MCP `autoui_type` 带 `element_id` 不触发 oninput（输入变成元素 id 串）；且视图重建后 `press` 焦点转移不可靠 | 驱动实测 | 驱动采用 press 聚焦+无 id type+读回校验重试；UI 流程设计为单输入打字（工程名预填）规避 |
+| G-8 | 屏幕端柱图 Init 为整数几何，小数数值单元格使 Init 中止（模型停留默认值）；导出 SVG 渲染器定点百位不受限 | [-300,0,25.5] 屏幕无图、导出正确 | Spec delta 记录屏幕端整数值域限制与 owner；导出为精确工件 |
+| — | 窗口启动是环境级 flake（MCP 不 bind，desktop_mcp.py 在案先例） | 多次复现 | 验收驱动 3 次重拉循环 |
+| — | `npm_deps` 条目经 pac→package.json 合并以**原样条目为键**（无版本拆分） | `"@vueuse/core:latest"` 整串成键 → pnpm 400 | app 侧用裸包名（ver=latest）；owner：auto-man/auto-ui |
+
 ## 4. 现有柱图组件能力边界（T-03 输入）
 
 - `bar_chart.at`：band scale，vmax 仅从 0 向上取正 max；负值 ytop 越界 viewBox、全负数据 domain 退化为 4 且刻度无负半轴；零值正常（零高柱）。

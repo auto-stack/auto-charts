@@ -50,13 +50,13 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
         xLab17 str = ""
         xLab18 str = ""
         xLab19 str = ""
-        yTick4 str = ""
-        yTick3 str = ""
-        yTick2 str = ""
-        yTick1 str = ""
-        yTick0 str = ""
-        gridPath str = ""
-        baselineY str = "260"
+        barTick4 str = ""
+        barTick3 str = ""
+        barTick2 str = ""
+        barTick1 str = ""
+        barTick0 str = ""
+        barGrid str = ""
+        barBaseY str = "260"
         legendColor0 str = ""
         legendText0 str = ""
         legendColor1 str = ""
@@ -84,7 +84,14 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                 for d in .data {
                     var cum int = 0
                     for f in .fields {
-                        var v0 = d[f]
+                        var vs1 str = (d[f]).to_string()
+                        var dot1 int = vs1.find(".")
+                        var v0 int = 0
+                        if dot1 >= 0 {
+                            v0 = vs1.substr(0, dot1).to_int()
+                        } else {
+                            v0 = vs1.to_int()
+                        }
                         cum = cum + v0
                     }
                     if cum > vmax {
@@ -97,7 +104,14 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             } else {
                 for d in .data {
                     for f in .fields {
-                        var v = d[f]
+                        var vs0 str = (d[f]).to_string()
+                        var dot0 int = vs0.find(".")
+                        var v int = 0
+                        if dot0 >= 0 {
+                            v = vs0.substr(0, dot0).to_int()
+                        } else {
+                            v = vs0.to_int()
+                        }
                         if v > vmax {
                             vmax = v
                         }
@@ -161,7 +175,7 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             // 基线 y(0)(vmin≥0 时贴底,vmax≤0 时贴顶)
             var zf float = 0.0
             var y0 float = bottom - (zf - vminf) / spanf * spanpx
-            .baselineY = f"${y0}"
+            .barBaseY = f"${y0}"
             // 逐刻度 y 与网格路径(自顶 = 最高刻度 btk 向下;int 求值后
             // 显式存储强转 float——几何纪律)
             var gf float = btk
@@ -178,33 +192,33 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             var gv0 int = btk - step * 4
             var gv0f float = gv0
             var gy0 float = bottom - (gv0f - vminf) / spanf * spanpx
-            .yTick4 = f"${btk}"
+            .barTick4 = f"${btk}"
             var gp str = f"M40 ${gy4} H550"
             if count >= 2 {
-                .yTick3 = f"${gv3}"
+                .barTick3 = f"${gv3}"
                 gp = gp + f" M40 ${gy3} H550"
             } else {
-                .yTick3 = ""
+                .barTick3 = ""
             }
             if count >= 3 {
-                .yTick2 = f"${gv2}"
+                .barTick2 = f"${gv2}"
                 gp = gp + f" M40 ${gy2} H550"
             } else {
-                .yTick2 = ""
+                .barTick2 = ""
             }
             if count >= 4 {
-                .yTick1 = f"${gv1}"
+                .barTick1 = f"${gv1}"
                 gp = gp + f" M40 ${gy1} H550"
             } else {
-                .yTick1 = ""
+                .barTick1 = ""
             }
             if count >= 5 {
-                .yTick0 = f"${gv0}"
+                .barTick0 = f"${gv0}"
                 gp = gp + f" M40 ${gy0} H550"
             } else {
-                .yTick0 = ""
+                .barTick0 = ""
             }
-            .gridPath = gp
+            .barGrid = gp
             var domainf float = span
 
             var n int = .data.len()
@@ -532,21 +546,21 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             row (style: "items-stretch w-full") {
                 if .axis == "auto" {
                     col (style: "w-10 shrink-0 justify-between items-end pr-1 pt-[20px] pb-[40px]") {
-                        text .yTick4 { style: hint_text }
-                        text .yTick3 { style: hint_text }
-                        text .yTick2 { style: hint_text }
-                        text .yTick1 { style: hint_text }
-                        text .yTick0 { style: hint_text }
+                        text .barTick4 { style: hint_text }
+                        text .barTick3 { style: hint_text }
+                        text .barTick2 { style: hint_text }
+                        text .barTick1 { style: hint_text }
+                        text .barTick0 { style: hint_text }
                     }
                 }
                 col (style: "flex-1") {
                     col (style: "relative") {
                         svg (viewBox: "0 0 560 300", style: "w-full h-auto") {
                             if .grid {
-                                path (d: .gridPath, stroke: "#e2e8f0", stroke-width: "1") {}
+                                path (d: .barGrid, stroke: "#e2e8f0", stroke-width: "1") {}
                             }
                             line (x1: "40", y1: "20", x2: "40", y2: "260", stroke: "#94a3b8", stroke-width: "1") {}
-                            line (x1: "40", y1: .baselineY, x2: "550", y2: .baselineY, stroke: "#94a3b8", stroke-width: "1") {}
+                            line (x1: "40", y1: .barBaseY, x2: "550", y2: .barBaseY, stroke: "#94a3b8", stroke-width: "1") {}
                             if .legendText0 != "" {
                               if .visBr0 {
                                 for seg in .segs0 {

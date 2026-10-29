@@ -13,6 +13,11 @@ title: "Charts"
 title_zh: "图表"
 front_port: 17850
 back_port: 17851
+# CHARTS-001 T-04：物化的 shadcn Checkbox 脚手架 import @vueuse/core，
+# 但打包器依生成码 import 标记决定依赖声明（本应用不再用 checkbox widget
+# → 标记缺失 → 依赖被裁 → vue-tsc TS2307，框架缺口 G-5 记录于
+# capability-decision）。app 侧经 npm_deps 显式钉住脚手架实需。
+npm_deps: ["@vueuse/core"]
 desktop: "true"
 
 dep stylekit {

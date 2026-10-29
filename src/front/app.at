@@ -1,48 +1,73 @@
-// front/app.at - Charts 图表工坊(Plan 445 M1 → Plan 484 M4 组件化迁移)
+// front/app.at - Charts 图表工坊（CHARTS-001 T-04 用户数据形态）
 //
-// 806 行内联几何(Init/Reset/.Tick 三份复制)退役,四类图改为 official
-// 包裸名原语消费(line-chart/bar-chart/area-chart/donut-chart):几何由
-// 组件 Init 派生(纯幂等),父级只维护数据与交互状态。流式滑窗
-// (.Tick 追数据点)语义不变:monthly 数据变化 → 子组件 props 重播种 →
-// Init 重放 → 几何自动重算(ADR-19)。
+// 从固定 monthly/seed 演示补为用户 CSV 图表工具：导入(路径输入) →
+// 列映射(类别列+1..4数值列) → 图表(官方组件,真实数据) → 保存工程(内嵌
+// 数据,重开) → 导出独立 SVG。普通启动空态;示例数据仅显式「载入示例」
+// 入口;演示期流式 Tick/Play/Pause/滑窗机制整体退役(用户数据不再被
+// 模拟覆盖)。
+//
+// 数据面：后端 VM HTTP(/api/v1/*, lazy back 随首请求孵化,reader 同配
+// 方)；Http.post/get_json 解析一次后再 json.parse(双层编码信封,reader
+// 先例)。列映射变更经 /api/v1/validate 以源文件复核(错误报行列,不置
+// 0 不静默)；工程打开走内嵌数据(信任保存时已验映射,导出时服务端再验)。
+// 任一失败保留当前有效工程,只更新错误状态(AC-04)。
 
 style tab_btn = "px-3 py-2 text-sm rounded-md border bg-background hover:bg-accent"
 style tab_btn_primary = "px-3 py-2 text-sm rounded-md bg-primary text-primary-foreground"
 style section_label = "text-xs font-semibold text-muted-foreground uppercase tracking-wide"
 style list_label = "text-sm font-medium flex-1"
-style seg_input = "px-2 py-1.5 text-xs rounded-md border bg-background flex-1"
-style seg_btn_primary = "px-2 py-1.5 text-xs rounded-md bg-primary text-primary-foreground flex-1"
+style seg_input = "px-2 py-1.5 text-xs rounded-md border bg-background"
+style seg_btn_primary = "px-2 py-1.5 text-xs rounded-md bg-primary text-primary-foreground"
+style col_btn_primary = "px-3 py-2 text-sm rounded-md bg-primary text-primary-foreground"
+style row_btn_primary = "px-2 py-1.5 text-xs rounded-md bg-primary text-primary-foreground flex-1"
 style row_gap2 = "items-center gap-2"
+style err_text = "text-xs text-destructive"
+style ok_text = "text-xs text-muted-foreground"
+style chip_btn = "px-2 py-1 text-xs rounded border bg-background hover:bg-accent"
+style chip_btn_active = "px-2 py-1 text-xs rounded bg-primary text-primary-foreground"
+style panel = "w-80 shrink-0 rounded-lg border p-4 gap-3"
 
 widget App {
     use { package: official from "components" }
 
-    msg { Init, SetLine, SetBar, SetArea, SetDonut, ToggleDesktop, ToggleMobile, ToggleTablet, Play, Pause, Reset, SetWin8, SetWin12, SetWin20 }
+    msg { Init, SetLine, SetBar, SetArea, SetDonut,
+          CsvPathChanged(str), DoImport, NameChanged(str), DoSave,
+          ExpPathChanged(str), DoExport, LoadSample,
+          SetIndexCol(int), ToggleValueCol(int), RefreshProjects, OpenProject(str) }
 
     model {
-        // ---- 状态 ----
-        chartType str = "line"
-        dVisible bool = true
-        mVisible bool = true
-        tVisible bool = false
+        // ---- 图表类型 ----
+        chartType str = "bar"
 
-        // ---- 流式:running(str "true"/"false")门控启停(012 惯例) ----
-        interval int = 400
-        running str = "false"
-        windowLen int = 12
-        tickN int = 0
+        // ---- 导入/映射/保存/导出状态 ----
+        csvPath str = ""
+        projName str = ""
+        expPath str = ""
+        statusMsg str = "输入 CSV 文件路径后点「导入」,或点「载入示例」"
+        statusErr bool = false
+        datasetLoaded bool = false
+        sampleMode bool = false
 
-        // ---- 数据(双模式):seed 为静态展示源(Reset 的不变式);
-        // monthly 为当前展示数据 ----
+        // ---- 数据集(导入/工程/示例共用) ----
+        recs List = []                // 对象行(组件 data 契约)
+        headerRows List = []          // [{i,name,isIdx,isVal}] 映射 UI
+        indexCol int = -1
+        indexKey str = ""
+        v0 int = -1
+        v1 int = -1
+        v2 int = -1
+        v3 int = -1
+        fieldKeys List<str> = []
+        fieldLabels List<str> = []
+        donutField str = ""
+        chartReady bool = false
+
+        // ---- 工程列表/当前工程 ----
+        currentProjectId str = ""
+        projects List = []
+
+        // ---- 示例数据(仅显式入口;不变式源) ----
         seed = [
-            { m: "Jan", desktop: 186, mobile: 80,  tablet: 40 },
-            { m: "Feb", desktop: 305, mobile: 200, tablet: 90 },
-            { m: "Mar", desktop: 237, mobile: 120, tablet: 60 },
-            { m: "Apr", desktop: 73,  mobile: 190, tablet: 110 },
-            { m: "May", desktop: 209, mobile: 130, tablet: 70 },
-            { m: "Jun", desktop: 214, mobile: 140, tablet: 85 }
-        ]
-        monthly = [
             { m: "Jan", desktop: 186, mobile: 80,  tablet: 40 },
             { m: "Feb", desktop: 305, mobile: 200, tablet: 90 },
             { m: "Mar", desktop: 237, mobile: 120, tablet: 60 },
@@ -55,72 +80,511 @@ widget App {
     on {
         .Init -> { }
 
-        // ---- 类型切换/系列开关:单行 handler ----
+        // ---- 图表类型切换 ----
         .SetLine -> { .chartType = "line" }
         .SetBar -> { .chartType = "bar" }
         .SetArea -> { .chartType = "area" }
         .SetDonut -> { .chartType = "donut" }
-        .ToggleDesktop -> {
-            if .dVisible {
-                .dVisible = false
-            } else {
-                .dVisible = true
-            }
-        }
-        .ToggleMobile -> {
-            if .mVisible {
-                .mVisible = false
-            } else {
-                .mVisible = true
-            }
-        }
-        .ToggleTablet -> {
-            if .tVisible {
-                .tVisible = false
-            } else {
-                .tVisible = true
-            }
-        }
 
-        // ---- 流式控制 ----
-        .Play -> { .running = "true" }
-        .Pause -> { .running = "false" }
-        .SetWin8 -> { .windowLen = 8 }
-        .SetWin12 -> { .windowLen = 12 }
-        .SetWin20 -> { .windowLen = 20 }
-
-        // ---- 滑窗:追数据点 + 滑出旧点(几何重算交给组件) ----
-        .Tick -> {
-            if .running == "true" {
-                .tickN = .tickN + 1
-                var nd = 150 + (.tickN * 37) % 120
-                var nm = 100 + (.tickN * 53) % 130
-                var nt = 50 + (.tickN * 29) % 90
-                var lbl = f"t${.tickN}"
-                var out = []
-                var first = true
-                var over = .monthly.len() >= .windowLen
-                for d in .monthly {
-                    if over && first {
-                        first = false
-                    } else {
-                        out.push(d)
+        // ---- 导入 ----
+        .CsvPathChanged(v str) -> {
+            .csvPath = v
+        }
+        .DoImport -> {
+            .statusErr = false
+            try {
+                // VM 轨 Http.post body 为 JSON 字符串（post_json 语义）；
+                // 路径统一正斜杠（Windows 接受且免反斜杠转义）
+                var pth = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                var resp = Http.get_json("/api/v1/import?path=" + pth)
+                var obj = json.parse(resp)
+                if obj.ok == false {
+                    .statusErr = true
+                    var rown = obj.err_row
+                    var coln = obj.err_col
+                    .statusMsg = "导入失败(" + obj.err_code + ") 行" + rown.to_string() + " 列" + coln.to_string() + ": " + obj.detail
+                } else {
+                    .recs = json.parse(obj.recs_frag)
+                    var keys = json.parse(obj.keys_frag)
+                    .indexCol = -1
+                    .indexKey = ""
+                    .v0 = -1
+                    .v1 = -1
+                    .v2 = -1
+                    .v3 = -1
+                    .fieldKeys = []
+                    .fieldLabels = []
+                    .donutField = ""
+                    .chartReady = false
+                    .datasetLoaded = true
+                    .sampleMode = false
+                    .currentProjectId = ""
+                    // headerRows 装配(全否标记)
+                    var hr List = []
+                    var ci = 0
+                    for k in keys {
+                        hr.push({ i: ci, name: k, isIdx: false, isVal: false })
+                        ci = ci + 1
                     }
+                    .headerRows = hr
+                    var rc = obj.row_count
+                    var cc = obj.col_count
+                    // 工程名预填：源文件名去扩展名（UX 预填,可改写）
+                    var base = pth
+                    var cut = 0
+                    var scan = 0
+                    while scan < base.len() {
+                        if base.substr(scan, 1) == "/" {
+                            cut = scan + 1
+                        }
+                        scan = scan + 1
+                    }
+                    if cut > 0 {
+                        base = base.substr(cut, base.len() - cut)
+                    }
+                    var dotpos = -1
+                    var scan2 = 0
+                    while scan2 < base.len() {
+                        if base.substr(scan2, 1) == "." {
+                            dotpos = scan2
+                        }
+                        scan2 = scan2 + 1
+                    }
+                    if dotpos > 0 {
+                        base = base.substr(0, dotpos)
+                    }
+                    if base.len() > 64 {
+                        base = base.substr(0, 64)
+                    }
+                    .projName = base
+                    .statusMsg = "已导入 " + rc.to_string() + " 行 × " + cc.to_string() + " 列,请设置类别列与数值列"
                 }
-                out.push({ m: lbl, desktop: nd, mobile: nm, tablet: nt })
-                .monthly = out
+            } catch {
+                .statusErr = true
+                .statusMsg = "导入失败:后端不可达(请确认应用以 VM 后端启动)"
             }
         }
 
-        // ---- Reset:monthly 重建自 seed(不变式) ----
-        .Reset -> {
-            .running = "false"
-            .tickN = 0
+        // ---- 示例(显式入口) ----
+        .LoadSample -> {
             var out = []
             for d in .seed {
                 out.push(d)
             }
-            .monthly = out
+            .recs = out
+            .indexCol = 0
+            .indexKey = "m"
+            .v0 = 1
+            .v1 = 2
+            .v2 = 3
+            .v3 = -1
+            var fk List<str> = []
+            fk.push("desktop")
+            fk.push("mobile")
+            fk.push("tablet")
+            .fieldKeys = fk
+            .fieldLabels = fk
+            .donutField = "desktop"
+            var hr List = []
+            hr.push({ i: 0, name: "m", isIdx: true, isVal: false })
+            hr.push({ i: 1, name: "desktop", isIdx: false, isVal: true })
+            hr.push({ i: 2, name: "mobile", isIdx: false, isVal: true })
+            hr.push({ i: 3, name: "tablet", isIdx: false, isVal: true })
+            .headerRows = hr
+            .chartReady = true
+            .datasetLoaded = true
+            .sampleMode = true
+            .currentProjectId = ""
+            .statusErr = false
+            .statusMsg = "示例数据已载入(显式入口);导入真实 CSV 将替换"
+        }
+
+        // ---- 列映射(handler 间不可互调,重建逻辑就地内联) ----
+        .SetIndexCol(i int) -> {
+            if .datasetLoaded {
+                .indexCol = i
+                var kk = ""
+                var ci = 0
+                for h in .headerRows {
+                    if ci == i {
+                        kk = h.name
+                    }
+                    ci = ci + 1
+                }
+                .indexKey = kk
+                var hr List = []
+                var cj = 0
+                for h2 in .headerRows {
+                    var iv bool = false
+                    if cj == .v0 {
+                        iv = true
+                    }
+                    if cj == .v1 {
+                        iv = true
+                    }
+                    if cj == .v2 {
+                        iv = true
+                    }
+                    if cj == .v3 {
+                        iv = true
+                    }
+                    hr.push({ i: h2.i, name: h2.name, isIdx: cj == i, isVal: iv })
+                    cj = cj + 1
+                }
+                .headerRows = hr
+                if .v0 >= 0 {
+                    if .sampleMode == false {
+                        try {
+                            var pth2 = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                            var ic2 = 0 + .indexCol
+                            var w2 = 0 + .v0
+                            var x2 = 0 + .v1
+                            var y2 = 0 + .v2
+                            var z2 = 0 + .v3
+                            var q2 = "/api/v1/validate?path=" + pth2 + "&index_col=" + ic2.to_string() + "&v0=" + w2.to_string() + "&v1=" + x2.to_string() + "&v2=" + y2.to_string() + "&v3=" + z2.to_string()
+                            var vresp = Http.get_json(q2)
+                            var vobj = json.parse(vresp)
+                            if vobj.ok == false {
+                                .chartReady = false
+                                .statusErr = true
+                                var vrown = vobj.err_row
+                                var vcoln = vobj.err_col
+                                .statusMsg = "映射无效(" + vobj.err_code + ") 行" + vrown.to_string() + " 列" + vcoln.to_string() + ": " + vobj.detail
+                            } else {
+                                .chartReady = true
+                                .statusErr = false
+                                .statusMsg = "映射有效"
+                            }
+                        } catch {
+                            .chartReady = false
+                            .statusErr = true
+                            .statusMsg = "校验失败:后端不可达"
+                        }
+                    } else {
+                        .chartReady = true
+                    }
+                }
+            }
+        }
+        .ToggleValueCol(i int) -> {
+            if .datasetLoaded {
+                // 已在槽位则摘除,否则填入首个空槽(>4 拒绝,预算冻结)
+                var in0 bool = .v0 == i
+                var in1 bool = .v1 == i
+                var in2 bool = .v2 == i
+                var in3 bool = .v3 == i
+                if in0 {
+                    .v0 = -1
+                } else {
+                    if in1 {
+                        .v1 = -1
+                    } else {
+                        if in2 {
+                            .v2 = -1
+                        } else {
+                            if in3 {
+                                .v3 = -1
+                            } else {
+                                if .v0 < 0 {
+                                    .v0 = i
+                                } else {
+                                    if .v1 < 0 {
+                                        .v1 = i
+                                    } else {
+                                        if .v2 < 0 {
+                                            .v2 = i
+                                        } else {
+                                            if .v3 < 0 {
+                                                .v3 = i
+                                            } else {
+                                                .statusErr = true
+                                                .statusMsg = "数值列最多 4 列(柱图系列上限)"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // 紧凑化槽位(摘除后前移)
+                var a = .v0
+                var b = .v1
+                var c = .v2
+                var dd = .v3
+                if a < 0 {
+                    a = b
+                    b = c
+                    c = dd
+                    dd = -1
+                }
+                if b < 0 {
+                    b = c
+                    c = dd
+                    dd = -1
+                }
+                if c < 0 {
+                    c = dd
+                    dd = -1
+                }
+                .v0 = a
+                .v1 = b
+                .v2 = c
+                .v3 = dd
+                // 重建 fieldKeys/fieldLabels/donutField/headerRows
+                var fk List<str> = []
+                var fl List<str> = []
+                var hr List = []
+                    var cj = 0
+                    for h2 in .headerRows {
+                        var isv bool = false
+                        if cj == .v0 {
+                            isv = true
+                            fk.push(h2.name)
+                            fl.push(h2.name)
+                        }
+                        if cj == .v1 {
+                            isv = true
+                            fk.push(h2.name)
+                            fl.push(h2.name)
+                        }
+                        if cj == .v2 {
+                            isv = true
+                            fk.push(h2.name)
+                            fl.push(h2.name)
+                        }
+                        if cj == .v3 {
+                            isv = true
+                            fk.push(h2.name)
+                            fl.push(h2.name)
+                        }
+                        hr.push({ i: h2.i, name: h2.name, isIdx: cj == .indexCol, isVal: isv })
+                        cj = cj + 1
+                    }
+                .fieldKeys = fk
+                .fieldLabels = fl
+                var dk = ""
+                var dci = 0
+                for h3 in .headerRows {
+                    if dci == .v0 {
+                        dk = h3.name
+                    }
+                    dci = dci + 1
+                }
+                .donutField = dk
+                if .indexCol >= 0 {
+                    if .v0 >= 0 {
+                        if .sampleMode == false {
+                            try {
+                                var pth3 = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                                var ic3 = 0 + .indexCol
+                                var w3 = 0 + .v0
+                                var x3 = 0 + .v1
+                                var y3 = 0 + .v2
+                                var z3 = 0 + .v3
+                                var q3 = "/api/v1/validate?path=" + pth3 + "&index_col=" + ic3.to_string() + "&v0=" + w3.to_string() + "&v1=" + x3.to_string() + "&v2=" + y3.to_string() + "&v3=" + z3.to_string()
+                                var vresp2 = Http.get_json(q3)
+                                var vobj2 = json.parse(vresp2)
+                                if vobj2.ok == false {
+                                    .chartReady = false
+                                    .statusErr = true
+                                    var vrown2 = vobj2.err_row
+                                    var vcoln2 = vobj2.err_col
+                                    .statusMsg = "映射无效(" + vobj2.err_code + ") 行" + vrown2.to_string() + " 列" + vcoln2.to_string() + ": " + vobj2.detail
+                                } else {
+                                    .chartReady = true
+                                    .statusErr = false
+                                    .statusMsg = "映射有效"
+                                }
+                            } catch {
+                                .chartReady = false
+                                .statusErr = true
+                                .statusMsg = "校验失败:后端不可达"
+                            }
+                        } else {
+                            .chartReady = true
+                        }
+                    } else {
+                        .chartReady = false
+                        .statusMsg = "请选择至少一列数值"
+                    }
+                } else {
+                    .statusMsg = "请先设置类别列"
+                }
+            }
+        }
+
+        // ---- 保存 ----
+        .NameChanged(v str) -> {
+            .projName = v
+        }
+        .DoSave -> {
+            try {
+                var nm = ("" + .projName).replace("\"", "").replace("%", "%25").replace(" ", "%20")
+                var pth4 = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                var ic4 = 0 + .indexCol
+                var w4 = 0 + .v0
+                var x4 = 0 + .v1
+                var y4 = 0 + .v2
+                var z4 = 0 + .v3
+                var q4 = "/api/v1/save?name=" + nm + "&path=" + pth4 + "&index_col=" + ic4.to_string() + "&v0=" + w4.to_string() + "&v1=" + x4.to_string() + "&v2=" + y4.to_string() + "&v3=" + z4.to_string()
+                var resp = Http.get_json(q4)
+                var obj = json.parse(resp)
+                if obj.ok == false {
+                    .statusErr = true
+                    .statusMsg = "保存失败(" + obj.err_code + "): " + obj.detail
+                } else {
+                    .currentProjectId = obj.id
+                    .statusErr = false
+                    .statusMsg = "已保存工程 " + obj.id
+                }
+            } catch {
+                .statusErr = true
+                .statusMsg = "保存失败:后端不可达"
+            }
+        }
+
+        // ---- 打开 ----
+        .RefreshProjects -> {
+            try {
+                var resp = Http.get_json("/api/v1/projects")
+                var obj = json.parse(resp)
+                .projects = obj.projects
+                .statusErr = false
+                var n = obj.listed
+                .statusMsg = "工程列表已刷新(" + n.to_string() + " 项)"
+            } catch {
+                .statusErr = true
+                .statusMsg = "刷新失败:后端不可达"
+            }
+        }
+        .OpenProject(id str) -> {
+            try {
+                var gid = "" + id
+                var resp = Http.get_json("/api/v1/projects/" + gid)
+                var obj = json.parse(resp)
+                if obj.ok == false {
+                    .statusErr = true
+                    .statusMsg = "打开失败(" + obj.err_code + "): " + obj.detail
+                } else {
+                    .recs = json.parse(obj.recs_frag)
+                    var keys = json.parse(obj.keys_frag)
+                    .csvPath = obj.source_path
+                    .projName = obj.name
+                    .indexCol = obj.index_col
+                    var vcs = obj.value_cols
+                    var vi = 0
+                    var c0 = -1
+                    var c1 = -1
+                    var c2 = -1
+                    var c3 = -1
+                    for vc in vcs {
+                        if vi == 0 {
+                            c0 = vc
+                        }
+                        if vi == 1 {
+                            c1 = vc
+                        }
+                        if vi == 2 {
+                            c2 = vc
+                        }
+                        if vi == 3 {
+                            c3 = vc
+                        }
+                        vi = vi + 1
+                    }
+                    .v0 = c0
+                    .v1 = c1
+                    .v2 = c2
+                    .v3 = c3
+                    var hr List = []
+                    var ci = 0
+                    var fk List<str> = []
+                    var fl List<str> = []
+                    var kk = ""
+                    for k in keys {
+                        var isv bool = false
+                        if ci == .v0 {
+                            isv = true
+                            fk.push(k)
+                            fl.push(k)
+                        }
+                        if ci == .v1 {
+                            isv = true
+                            fk.push(k)
+                            fl.push(k)
+                        }
+                        if ci == .v2 {
+                            isv = true
+                            fk.push(k)
+                            fl.push(k)
+                        }
+                        if ci == .v3 {
+                            isv = true
+                            fk.push(k)
+                            fl.push(k)
+                        }
+                        if ci == .indexCol {
+                            kk = k
+                        }
+                        hr.push({ i: ci, name: k, isIdx: ci == .indexCol, isVal: isv })
+                        ci = ci + 1
+                    }
+                    .headerRows = hr
+                    .fieldKeys = fk
+                    .fieldLabels = fl
+                    .indexKey = kk
+                    var dk = ""
+                    var dci = 0
+                    for k2 in keys {
+                        if dci == .v0 {
+                            dk = k2
+                        }
+                        dci = dci + 1
+                    }
+                    .donutField = dk
+                    .chartReady = true
+                    .datasetLoaded = true
+                    .sampleMode = false
+                    .currentProjectId = id
+                    .statusErr = false
+                    .statusMsg = "已打开工程 " + obj.name
+                }
+            } catch {
+                .statusErr = true
+                .statusMsg = "打开失败:后端不可达"
+            }
+        }
+
+        // ---- 导出 ----
+        .ExpPathChanged(v str) -> {
+            .expPath = v
+        }
+        .DoExport -> {
+            try {
+                var pid = ("" + .currentProjectId).replace("%", "%25").replace(" ", "%20")
+                var pth5 = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                var nm5 = ("" + .projName).replace("\"", "").replace("%", "%25").replace(" ", "%20")
+                var ic5 = 0 + .indexCol
+                var w5 = 0 + .v0
+                var x5 = 0 + .v1
+                var y5 = 0 + .v2
+                var z5 = 0 + .v3
+                var out5 = ("" + .expPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                var q5 = "/api/v1/export?project_id=" + pid + "&path=" + pth5 + "&name=" + nm5 + "&index_col=" + ic5.to_string() + "&v0=" + w5.to_string() + "&v1=" + x5.to_string() + "&v2=" + y5.to_string() + "&v3=" + z5.to_string() + "&out_path=" + out5
+                var resp = Http.get_json(q5)
+                var obj = json.parse(resp)
+                if obj.ok == false {
+                    .statusErr = true
+                    .statusMsg = "导出失败(" + obj.err_code + "): " + obj.detail
+                } else {
+                    .statusErr = false
+                    .statusMsg = "已导出 SVG → " + obj.path
+                }
+            } catch {
+                .statusErr = true
+                .statusMsg = "导出失败:后端不可达"
+            }
         }
     }
 
@@ -128,105 +592,136 @@ widget App {
         col (style: "min-h-screen bg-background p-6 gap-4") {
             col (style: "gap-1") {
                 h1 "图表工坊" { style: "text-2xl font-bold tracking-tight" }
-                text "切换类型 → 开关系列 → 观察渲染。几何由官方 chart 组件自动计算(484 组件化迁移)。" { style: "text-sm text-muted-foreground" }
+                text "导入 CSV → 设置列映射 → 图表 → 保存/重开 → 导出 SVG" { style: "text-sm text-muted-foreground" }
+                if .statusErr {
+                    text .statusMsg { style: err_text }
+                } else {
+                    text .statusMsg { style: ok_text }
+                }
             }
 
             row (style: "gap-6 items-start flex-1") {
-                // ---- 左:数据面板 ----
-                col (style: "w-72 shrink-0 rounded-lg border p-4 gap-4") {
-                    text "Chart type" { style: section_label }
-                    col (style: "grid grid-cols-2 gap-2") {
-                        if .chartType == "line" {
-                            button "Line ●" { onclick: .SetLine, style: tab_btn_primary }
-                        } else {
-                            button "Line" { onclick: .SetLine, style: tab_btn }
-                        }
-                        if .chartType == "bar" {
-                            button "Bar ●" { onclick: .SetBar, style: tab_btn_primary }
-                        } else {
-                            button "Bar" { onclick: .SetBar, style: tab_btn }
-                        }
-                        if .chartType == "area" {
-                            button "Area ●" { onclick: .SetArea, style: tab_btn_primary }
-                        } else {
-                            button "Area" { onclick: .SetArea, style: tab_btn }
-                        }
-                        if .chartType == "donut" {
-                            button "Donut ●" { onclick: .SetDonut, style: tab_btn_primary }
-                        } else {
-                            button "Donut" { onclick: .SetDonut, style: tab_btn }
-                        }
-                    }
-
-                    text "Series" { style: section_label }
-                    row (style: row_gap2) {
-                        span (style: "w-3 h-3 rounded-sm bg-[#2563eb] shrink-0") {}
-                        text "Desktop" { style: list_label }
-                        checkbox {
-                            checked: .dVisible,
-                            onclick: .ToggleDesktop
-                        }
-                    }
-                    row (style: row_gap2) {
-                        span (style: "w-3 h-3 rounded-sm bg-[#16a34a] shrink-0") {}
-                        text "Mobile" { style: list_label }
-                        checkbox {
-                            checked: .mVisible,
-                            onclick: .ToggleMobile
-                        }
-                    }
-                    row (style: row_gap2) {
-                        span (style: "w-3 h-3 rounded-sm bg-[#d97706] shrink-0") {}
-                        text "Tablet" { style: list_label }
-                        checkbox {
-                            checked: .tVisible,
-                            onclick: .ToggleTablet
-                        }
-                    }
-
-                    text "Streaming" { style: section_label }
-                    row (style: "gap-2") {
-                        if .running == "true" {
-                            button "⏸ Pause" { onclick: .Pause, style: "px-3 py-2 text-sm rounded-md bg-secondary text-secondary-foreground flex-1" }   // Phase B: Pause red→secondary（012 先例）
-                        } else {
-                            button "▶ Play" { onclick: .Play, style: "px-3 py-2 text-sm rounded-md bg-primary text-primary-foreground flex-1" }   // Phase B: Play green→primary（012 先例）
-                        }
-                        button "Reset" { onclick: .Reset, style: tab_btn }
+                // ---- 左:操作面板 ----
+                col (style: panel) {
+                    text "导入 CSV" { style: section_label }
+                    input {
+                        value: .csvPath
+                        oninput: .CsvPathChanged
+                        onenter: .DoImport
+                        placeholder: "CSV 文件路径"
+                        style: seg_input
                     }
                     row (style: "gap-2") {
-                        if .windowLen == 8 {
-                            button "8 ●" { onclick: .SetWin8, style: seg_btn_primary }
-                        } else {
-                            button "8" { onclick: .SetWin8, style: seg_input }
-                        }
-                        if .windowLen == 12 {
-                            button "12 ●" { onclick: .SetWin12, style: seg_btn_primary }
-                        } else {
-                            button "12" { onclick: .SetWin12, style: seg_input }
-                        }
-                        if .windowLen == 20 {
-                            button "20 ●" { onclick: .SetWin20, style: seg_btn_primary }
-                        } else {
-                            button "20" { onclick: .SetWin20, style: seg_input }
-                        }
+                        button "导入" { onclick: .DoImport, style: row_btn_primary }
+                        button "载入示例" { onclick: .LoadSample, style: chip_btn }
                     }
-                    text "双模式:初始/Reset 为静态月度展示;Play 后每 400ms 追加点并滑出旧点。几何由组件自动重算。" { style: "text-xs text-muted-foreground" }
+
+                    if .datasetLoaded {
+                        text "列映射" { style: section_label }
+                        col (style: "gap-1") {
+                            for h in .headerRows {
+                                row (style: "items-center gap-2") {
+                                    text h.name { style: "text-xs flex-1 truncate" }
+                                    if h.isIdx {
+                                        button "类别●" { onclick: .SetIndexCol(h.i), style: chip_btn_active }
+                                    } else {
+                                        button "类别" { onclick: .SetIndexCol(h.i), style: chip_btn }
+                                    }
+                                    if h.isVal {
+                                        button "数值●" { onclick: .ToggleValueCol(h.i), style: chip_btn_active }
+                                    } else {
+                                        button "数值" { onclick: .ToggleValueCol(h.i), style: chip_btn }
+                                    }
+                                }
+                            }
+                        }
+
+                        text "保存工程" { style: section_label }
+                        input {
+                            value: .projName
+                            oninput: .NameChanged
+                            onenter: .DoSave
+                            placeholder: "工程名"
+                            style: seg_input
+                        }
+                        button "保存" { onclick: .DoSave, style: col_btn_primary }
+
+                        text "打开工程" { style: section_label }
+                        button "刷新列表" { onclick: .RefreshProjects, style: chip_btn }
+                        col (style: "gap-1") {
+                            for p in .projects {
+                                if p.corrupt {
+                                    text p.id { style: err_text }
+                                } else {
+                                    row (style: "items-center gap-2") {
+                                        text p.name { style: "text-xs flex-1 truncate" }
+                                        button "打开" { onclick: .OpenProject(p.id), style: chip_btn }
+                                    }
+                                }
+                            }
+                        }
+
+                        text "导出 SVG" { style: section_label }
+                        input {
+                            value: .expPath
+                            oninput: .ExpPathChanged
+                            onenter: .DoExport
+                            placeholder: "输出路径(留空=数据目录 exports/)"
+                            style: seg_input
+                        }
+                        button "导出 SVG" { onclick: .DoExport, style: col_btn_primary }
+                    }
                 }
 
-                // ---- 右:图表区(官方组件消费) ----
-                // props 写在括号内（组件契约形态；body 内裸赋值不进 props 通道）
+                // ---- 右:图表区 ----
                 col (style: "flex-1 rounded-lg border p-4 gap-2") {
-                    if .chartType == "line" {
-                        line-chart (data: .monthly, index: "m", fields: ["desktop", "mobile", "tablet"], labels: ["Desktop", "Mobile", "Tablet"]) {}
-                    }
-                    if .chartType == "bar" {
-                        bar-chart (data: .monthly, index: "m", fields: ["desktop", "mobile", "tablet"], labels: ["Desktop", "Mobile", "Tablet"]) {}
-                    }
-                    if .chartType == "area" {
-                        area-chart (data: .monthly, index: "m", fields: ["desktop", "mobile", "tablet"], labels: ["Desktop", "Mobile", "Tablet"]) {}
-                    }
-                    if .chartType == "donut" {
-                        donut-chart (data: .monthly, index: "m", field: "desktop") {}
+                    if .datasetLoaded {
+                        if .chartReady {
+                            row (style: "gap-2") {
+                                if .chartType == "line" {
+                                    button "Line ●" { onclick: .SetLine, style: tab_btn_primary }
+                                } else {
+                                    button "Line" { onclick: .SetLine, style: tab_btn }
+                                }
+                                if .chartType == "bar" {
+                                    button "Bar ●" { onclick: .SetBar, style: tab_btn_primary }
+                                } else {
+                                    button "Bar" { onclick: .SetBar, style: tab_btn }
+                                }
+                                if .chartType == "area" {
+                                    button "Area ●" { onclick: .SetArea, style: tab_btn_primary }
+                                } else {
+                                    button "Area" { onclick: .SetArea, style: tab_btn }
+                                }
+                                if .chartType == "donut" {
+                                    button "Donut ●" { onclick: .SetDonut, style: tab_btn_primary }
+                                } else {
+                                    button "Donut" { onclick: .SetDonut, style: tab_btn }
+                                }
+                            }
+                            if .chartType == "line" {
+                                line-chart (data: .recs, index: .indexKey, fields: .fieldKeys, labels: .fieldLabels) {}
+                            }
+                            if .chartType == "bar" {
+                                bar-chart (data: .recs, index: .indexKey, fields: .fieldKeys, labels: .fieldLabels) {}
+                            }
+                            if .chartType == "area" {
+                                area-chart (data: .recs, index: .indexKey, fields: .fieldKeys, labels: .fieldLabels) {}
+                            }
+                            if .chartType == "donut" {
+                                donut-chart (data: .recs, index: .indexKey, field: .donutField) {}
+                            }
+                        } else {
+                            col (style: "gap-2 items-center justify-center py-20") {
+                                text "请完成列映射" { style: "text-sm text-muted-foreground" }
+                                text "选择一列「类别」与至少一列「数值」后出图" { style: "text-xs text-muted-foreground" }
+                            }
+                        }
+                    } else {
+                        col (style: "gap-2 items-center justify-center py-20") {
+                            text "尚无数据" { style: "text-sm text-muted-foreground" }
+                            text "导入 CSV 或载入示例开始" { style: "text-xs text-muted-foreground" }
+                        }
                     }
                 }
             }
