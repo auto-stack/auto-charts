@@ -53,7 +53,7 @@
 | G-6a | `Http.post(url, body)` 双轨 body 编码分歧：vue codegen 走 `JSON.stringify(实参)`（要**对象**），VM 轨改写为 `auto.http.post_json` 且 `VMConvertible→String` 对 map **只回内部槽位句柄**（固定值 `18443647848969734425`，与内容无关） | vue 诊断页 body 回显；VM 回显句柄 | app 侧全量改 **GET+query**（标量参数，reader get_chapter 同款）；owner：auto-lang（VM map→JSON 编码缺失） |
 | G-6b | 查询参数 `%XX` 解码按 **latin-1 逐字节**→ CJK 乱码（`%E6%8E%A2` → `æ¢`）；原始 UTF-8 字节直传正常 | 探针 percent 编码 CJK 工程名 → name 乱码；raw 直传正确 | 查询值仅编码 `%`/空格，CJK 走原始 UTF-8；owner：auto-lang（http_server query 解码）。影响：vue fetch 自动 percent-encode 非 ASCII → **vue 轨 CJK 路径/工程名降级**（VM 轨正常） |
 | G-7 | VM 窗口 MCP `autoui_type` 带 `element_id` 不触发 oninput（输入变成元素 id 串）；且视图重建后 `press` 焦点转移不可靠 | 驱动实测 | 驱动采用 press 聚焦+无 id type+读回校验重试；UI 流程设计为单输入打字（工程名预填）规避 |
-| G-8 | 屏幕端柱图 Init 为整数几何，小数数值单元格使 Init 中止（模型停留默认值）；导出 SVG 渲染器定点百位不受限 | [-300,0,25.5] 屏幕无图、导出正确 | Spec delta 记录屏幕端整数值域限制与 owner；导出为精确工件 |
+| G-8 | 屏幕端柱图 Init 为整数几何；小数数值单元格曾使 Init 中止（模型停留默认值）——2026-10-29 修复：值域经字符串手术截断取整（避免 float→int 赋值中止），柱高绘制仍用原值；导出 SVG 渲染器定点百位不受限 | 修复前 [-300,0,25.5] 屏幕无图；修复后正常出图（刻度取整），导出精确 | Spec delta 已更新实际行为；浮点值域原生支持缺口登记 auto-ui/auto-lang |
 | — | 窗口启动是环境级 flake（MCP 不 bind，desktop_mcp.py 在案先例） | 多次复现 | 验收驱动 3 次重拉循环 |
 | — | `npm_deps` 条目经 pac→package.json 合并以**原样条目为键**（无版本拆分） | `"@vueuse/core:latest"` 整串成键 → pnpm 400 | app 侧用裸包名（ver=latest）；owner：auto-man/auto-ui |
 

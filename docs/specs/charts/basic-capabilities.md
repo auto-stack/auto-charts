@@ -40,6 +40,8 @@
 - 数据集信封（import 响应）：`headers_frag`/`rows_frag`（转义 JSON
   数组串，存储与导出面，单元格逐字字符串）、`keys_frag`（去重列键）、
   `recs_frag`（对象行；数值形态单元格以 JSON 数字输出供组件消费）。
+- 列键去重序：重复/空表头取 `base` → `base#2` → `base#3`…（自然序，
+  首个冲突后从 #2 起）；空表头以 `c<下标>` 兜底。
 - 工程 v1 文档：`schema_version/name/slug/source_path/index_col/
   value_cols[4]/created_at/headers_frag/rows_frag/keys_frag/recs_frag/
   row_count/col_count`。
@@ -61,10 +63,11 @@
 
 ## 4. 已声明边界（非缺陷即合同）
 
-- **屏幕端整数几何（G-8）**：柱图组件值域/刻度按整数预算，小数数值
-  单元格使屏幕端 Init 中止（不出图）；导出 SVG 按定点百位精确渲染。
-  含小数数据以导出 SVG 为精确工件。owner：auto-ui/auto-lang（浮点
-  值域支持），随框架能力关闭。
+- **屏幕端整数几何（G-8）**：柱图组件值域/刻度按整数预算；小数数值
+  单元格在值域计算中截断取整（柱高仍按原始值精确绘制），不再中止
+  Init（2026-10-29 修复前：小数使 Init 中止不出图）。含小数数据的
+  刻度标签为截断整数值；导出 SVG 按定点百位精确渲染，为精确工件。
+  浮点值域原生支持的框架缺口登记 auto-ui/auto-lang。
 - **CJK 查询参数（G-6b）**：查询值 %XX 解码为逐字节 latin-1（框架），
   vue 轨 fetch 自动 percent-encode → CJK 文件路径/工程名在 vue 轨降级；
   VM 轨原始 UTF-8 正常。owner：auto-lang。

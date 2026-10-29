@@ -105,6 +105,14 @@ def main():
     check(r2[0][2] == 'say "hi"', "escaped quotes folded", r2)
     check(ds2.get("headers_frag") == '["label","note","val"]', "BOM stripped", ds2.get("headers_frag"))
 
+    # 2b. 重复表头：列键自然序去重（R-2 永久回归：a,a → a,a#2）
+    pdup = os.path.join(workdir, "duphdr.csv")
+    with open(pdup, "w", encoding="utf-8", newline="") as f:
+        f.write("a,a\n1,2\n")
+    dd = req("GET", "/api/v1/import?path=" + q(pdup))
+    kd = json.loads(dd.get("keys_frag", "[]")) if dd.get("ok") else None
+    check(kd == ["a", "a#2"], "dup headers keys natural dedupe", dd.get("keys_frag"))
+
     # 3. 坏数值：明确行列，不置 0
     csv3 = os.path.join(workdir, "badnum.csv")
     with open(csv3, "w", encoding="utf-8") as f:

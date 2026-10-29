@@ -368,29 +368,28 @@ pub fn parse_csv_parts(text str) str {
         if base.trim() == "" {
             base = "c" + ki.to_string()
         }
+        // 去重自然序：base → base#2 → base#3…（R-2 修复：原实现跳过 #2）
         var key str = base
         var dup int = 2
         var resolved bool = false
+        var guard3 int = 0
         while resolved == false {
-            var cand str = base
-            if dup > 2 {
-                cand = base + "#" + dup.to_string()
-            }
             var taken bool = false
             for prev in keys {
-                if prev == cand {
+                if prev == key {
                     taken = true
                 }
             }
-            if taken {
+            if taken == false {
+                resolved = true
+            } else {
+                key = base + "#" + dup.to_string()
                 dup = dup + 1
-                if dup > 200 {
+                guard3 = guard3 + 1
+                if guard3 > 200 {
                     key = "c" + ki.to_string()
                     resolved = true
                 }
-            } else {
-                key = cand
-                resolved = true
             }
         }
         keys.push(key)
