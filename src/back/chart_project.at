@@ -1,0 +1,1087 @@
+// src/back/chart_project.at — 图表工程数据服务（CHARTS-001 T-02/T-03）
+//
+// 职责：数据目录解析、映射校验（定点百位整数）、柱图 SVG 渲染、
+// 版本化工程存储（内嵌全量数据）、导出落盘。
+//
+// 纪律（T-00/T-01 实测，reader 同款）：无进程内缓存——每次公开调用从
+// 盘现读、改完即写；公开面全部标量与 JSON 字符串；json.parse 数组用
+// for-in 遍历（len()/索引在册缺陷 F-8），列定位靠计数器；写侧手工转义；
+// 无 rename/remove 原语 → 备份+暂存读回校验+提交+失败还原（非断电级
+// 原子，如实声明）。数值定点百位（×100）整数运算（i32 上限内），SVG
+// 坐标换算经 float 存储强转（int→float 存储强转纪律）+ float.to_string
+// 输出（auto-calc 先例）；字符判定用等值链（str 无跨字符序比较——reader
+// jsonx 先例）。阶梯刻度 = {1,2,5}·10^k（Spec delta 记录，oracle 同式）。
+//
+// 数据目录：AUTO_CHARTS_DATA → USERPROFILE|HOME/.auto-charts →
+// ./.auto-charts-data；projects/<slug>.json、exports/<name>.svg。
+
+use csv
+
+pub fn data_dir() str {
+    var env str = Env.get("AUTO_CHARTS_DATA")
+    if env != "" {
+        return env
+    }
+    var home str = Env.get("USERPROFILE")
+    if home == "" {
+        home = Env.get("HOME")
+    }
+    if home != "" {
+        return home + "/.auto-charts"
+    }
+    return "./.auto-charts-data"
+}
+
+fn projects_dir() str {
+    return data_dir() + "/projects"
+}
+
+fn projects_path(slug str) str {
+    return projects_dir() + "/" + slug + ".json"
+}
+
+pub fn exports_dir() str {
+    return data_dir() + "/exports"
+}
+
+// ═══════════════════════════════════════════════════════════
+// 错误信封
+// ═══════════════════════════════════════════════════════════
+
+pub fn err_json(code str, row int, col int, detail str) str {
+    var d str = csv.json_escape_cell(detail)
+    var r str = row.to_string()
+    var c str = col.to_string()
+    return "{\"ok\":false,\"err_code\":\"" + code + "\",\"err_row\":" + r + ",\"err_col\":" + c + ",\"detail\":\"" + d + "\"}"
+}
+
+// ═══════════════════════════════════════════════════════════
+// 写协议（reader F-06 同款：备份+暂存读回校验+提交+失败还原）
+// ═══════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════
+// fs 谓词归一（T-02 实测：exists/is_dir 返回 int 0/1，int==bool 恒
+// 不等；write/mkdir 返回真 bool。包装统一为 bool，兼容两种返回形态）
+// ═══════════════════════════════════════════════════════════
+
+fn fsx_exists(p str) bool {
+    var v = fs.exists(p)
+    if v == 0 {
+        return false
+    }
+    if v == 1 {
+        return true
+    }
+    return v
+}
+
+fn fsx_is_dir(p str) bool {
+    var v = fs.is_dir(p)
+    if v == 0 {
+        return false
+    }
+    if v == 1 {
+        return true
+    }
+    return v
+}
+
+fn fsx_write(p str, payload str) bool {
+    // 实测 errno 风格：0 = 成功；读回校验兜底真伪
+    var v = fs.write_text(p, payload)
+    if v == 0 {
+        return true
+    }
+    return false
+}
+
+fn fsx_mkdir_all(p str) bool {
+    // 实测 errno 风格：0 = 成功；后续 exists/is_dir 兜底
+    var v = fs.mkdir_all(p)
+    if v == 0 {
+        return true
+    }
+    return false
+}
+
+fn verified_write(path str, payload str) int {
+    var wok bool = fsx_write(path, payload)
+    if wok == false {
+        return -1
+    }
+    var wex bool = fsx_exists(path)
+    if wex == false {
+        return -2
+    }
+    var back str = fs.read_text(path)
+    if back != payload {
+        return -3
+    }
+    return 0
+}
+
+/// 返回 0=成功；-2 目标是目录；-3 现内容空/不可读；-4 备份失败；
+/// -5 暂存失败；其余为 verified_write 码。失败时目标不被触碰或已还原。
+fn write_with_backup(path str, payload str) int {
+    var hex bool = fsx_exists(path)
+    if hex {
+        var hdir bool = fsx_is_dir(path)
+        if hdir {
+            return -2
+        }
+        var prev str = fs.read_text(path)
+        if prev == "" {
+            return -3
+        }
+        var bak str = path + ".bak"
+        var brc int = verified_write(bak, prev)
+        if brc != 0 {
+            return -4
+        }
+    }
+    var tmp str = path + ".tmp"
+    var trc int = verified_write(tmp, payload)
+    if trc != 0 {
+        return -5
+    }
+    var wrc int = verified_write(path, payload)
+    if wrc != 0 {
+        var bak2 str = path + ".bak"
+        var bex bool = fsx_exists(bak2)
+        if bex {
+            var prev2 str = fs.read_text(bak2)
+            _ = verified_write(path, prev2)
+        }
+        return wrc
+    }
+    return 0
+}
+
+// ═══════════════════════════════════════════════════════════
+// 字符与定点十进制（×100）
+// ═══════════════════════════════════════════════════════════
+
+fn digit_val(c str) int {
+    if c == "0" {
+        return 0
+    }
+    if c == "1" {
+        return 1
+    }
+    if c == "2" {
+        return 2
+    }
+    if c == "3" {
+        return 3
+    }
+    if c == "4" {
+        return 4
+    }
+    if c == "5" {
+        return 5
+    }
+    if c == "6" {
+        return 6
+    }
+    if c == "7" {
+        return 7
+    }
+    if c == "8" {
+        return 8
+    }
+    if c == "9" {
+        return 9
+    }
+    return -1
+}
+
+const DEC_ERR_SYNTAX = -2000000000
+const DEC_ERR_RANGE = -1999999999
+const VALUE_LIMIT_H = 1000000000
+
+/// 语法：trim 后 [+-]?digits[.digits]（无指数/内部空格）；小数截断到
+/// 2 位；|值| ≤ 10,000,000（百位 ≤ 1e9，i32 安全）。违例返回哨兵。
+pub fn parse_dec_hundredths(s str) int {
+    var t str = s.trim()
+    var n int = t.len()
+    if n == 0 {
+        return DEC_ERR_SYNTAX
+    }
+    var neg bool = false
+    var i int = 0
+    var c0 str = t.substr(0, 1)
+    if c0 == "+" {
+        i = 1
+    } else {
+        if c0 == "-" {
+            neg = true
+            i = 1
+        }
+    }
+    var int_part int = 0
+    var digits int = 0
+    while i < n {
+        var c str = t.substr(i, 1)
+        var dv int = digit_val(c)
+        if dv < 0 {
+            if c == "." {
+                i = i + 1
+                break
+            }
+            return DEC_ERR_SYNTAX
+        }
+        int_part = int_part * 10 + dv
+        digits = digits + 1
+        if digits > 9 {
+            return DEC_ERR_RANGE
+        }
+        i = i + 1
+    }
+    var frac_h int = 0
+    var frac_digits int = 0
+    while i < n {
+        var c2 str = t.substr(i, 1)
+        var dv2 int = digit_val(c2)
+        if dv2 < 0 {
+            return DEC_ERR_SYNTAX
+        }
+        if frac_digits < 2 {
+            frac_h = frac_h * 10 + dv2
+            frac_digits = frac_digits + 1
+        }
+        i = i + 1
+    }
+    if digits == 0 {
+        return DEC_ERR_SYNTAX
+    }
+    while frac_digits < 2 {
+        frac_h = frac_h * 10
+        frac_digits = frac_digits + 1
+    }
+    var h int = int_part * 100 + frac_h
+    if neg {
+        h = 0 - h
+    }
+    if h >= VALUE_LIMIT_H {
+        return DEC_ERR_RANGE
+    }
+    if h <= 0 - VALUE_LIMIT_H {
+        return DEC_ERR_RANGE
+    }
+    return h
+}
+
+/// 百位定点 → 显示串（去尾零；整数无小数点）。刻度标签专用。
+pub fn format_hundredths(h int) str {
+    var sign str = ""
+    var mag int = h
+    if mag < 0 {
+        sign = "-"
+        mag = 0 - mag
+    }
+    var ip int = mag / 100
+    var fp int = mag - ip * 100
+    if fp == 0 {
+        return sign + ip.to_string()
+    }
+    var f2 str = fp.to_string()
+    if fp < 10 {
+        f2 = "0" + f2
+        if f2.substr(1, 1) == "0" {
+            f2 = f2.substr(0, 1)
+        }
+    } else {
+        if f2.substr(1, 1) == "0" {
+            f2 = f2.substr(0, 1)
+        }
+    }
+    return sign + ip.to_string() + "." + f2
+}
+
+// ═══════════════════════════════════════════════════════════
+// 工程 slug
+// ═══════════════════════════════════════════════════════════
+
+fn unsafe_name_char(c str) bool {
+    if c == "/" {
+        return true
+    }
+    if c == "\\" {
+        return true
+    }
+    if c == ":" {
+        return true
+    }
+    if c == "*" {
+        return true
+    }
+    if c == "?" {
+        return true
+    }
+    if c == "\"" {
+        return true
+    }
+    if c == "<" {
+        return true
+    }
+    if c == ">" {
+        return true
+    }
+    if c == "|" {
+        return true
+    }
+    if c == " " {
+        return true
+    }
+    if c == "%" {
+        return true
+    }
+    if c == "#" {
+        return true
+    }
+    return false
+}
+
+/// 字母/数字/-/_ 保留；Windows 保留字符与空格折叠为 -；其余（中文等）
+/// 保留；收缩连续 -、去首尾 -；≤64 字符；空结果 → "chart"。
+pub fn slug_of(name str) str {
+    var out str = ""
+    var n int = name.len()
+    var i int = 0
+    while i < n {
+        var c str = name.substr(i, 1)
+        var keep bool = true
+        if unsafe_name_char(c) {
+            keep = false
+        }
+        if keep {
+            out = out + c
+        } else {
+            out = out + "-"
+        }
+        i = i + 1
+    }
+    while out.find("--") >= 0 {
+        out = out.replace("--", "-")
+    }
+    if out.len() > 0 {
+        if out.substr(0, 1) == "-" {
+            out = out.substr(1, out.len() - 1)
+        }
+    }
+    if out.len() > 0 {
+        var lastc str = out.substr(out.len() - 1, 1)
+        if lastc == "-" {
+            out = out.substr(0, out.len() - 1)
+        }
+    }
+    if out.len() > 64 {
+        out = out.substr(0, 64)
+    }
+    if out.len() == 0 {
+        out = "chart"
+    }
+    return out
+}
+
+// ═══════════════════════════════════════════════════════════
+// 映射校验（rows_frag 为 csv.parse_csv_parts 的行数组 JSON 串）
+// ═══════════════════════════════════════════════════════════
+
+fn col_in_slots(col int, v0 int, v1 int, v2 int, v3 int) bool {
+    if col == v0 {
+        return true
+    }
+    if col == v1 {
+        return true
+    }
+    if col == v2 {
+        return true
+    }
+    if col == v3 {
+        return true
+    }
+    return false
+}
+
+/// 校验列引用与全部所选数值单元格（含类别≠数值、去重、越界、值域）。
+/// 行号按文件记录号（表头=1，首条数据=2）。
+pub fn validate_rows(rows_frag str, col_count int, index_col int, v0 int, v1 int, v2 int, v3 int) str {
+    if index_col < 0 {
+        return err_json("err_no_index", 0, index_col, "category column not set")
+    }
+    if index_col >= col_count {
+        return err_json("err_no_index", 0, index_col, "category column out of range")
+    }
+    if v0 < 0 {
+        return err_json("err_no_values", 0, v0, "at least one value column required")
+    }
+    if v0 >= col_count {
+        return err_json("err_bad_col", 0, v0, "value column out of range")
+    }
+    if v1 >= col_count {
+        return err_json("err_bad_col", 0, v1, "value column out of range")
+    }
+    if v2 >= col_count {
+        return err_json("err_bad_col", 0, v2, "value column out of range")
+    }
+    if v3 >= col_count {
+        return err_json("err_bad_col", 0, v3, "value column out of range")
+    }
+    if v1 >= 0 {
+        if v1 == v0 {
+            return err_json("err_dup_col", 0, v1, "duplicate value column")
+        }
+    }
+    if v2 >= 0 {
+        if col_in_slots(v2, v0, v1, -1, -1) {
+            return err_json("err_dup_col", 0, v2, "duplicate value column")
+        }
+    }
+    if v3 >= 0 {
+        if col_in_slots(v3, v0, v1, v2, -1) {
+            return err_json("err_dup_col", 0, v3, "duplicate value column")
+        }
+    }
+    if index_col == v0 {
+        return err_json("err_dup_col", 0, index_col, "category column equals value column")
+    }
+    if index_col == v1 {
+        if v1 >= 0 {
+            return err_json("err_dup_col", 0, index_col, "category column equals value column")
+        }
+    }
+    if index_col == v2 {
+        if v2 >= 0 {
+            return err_json("err_dup_col", 0, index_col, "category column equals value column")
+        }
+    }
+    if index_col == v3 {
+        if v3 >= 0 {
+            return err_json("err_dup_col", 0, index_col, "category column equals value column")
+        }
+    }
+    var rows = json.parse(rows_frag)
+    var row_no int = 1
+    for row in rows {
+        row_no = row_no + 1
+        var ci int = 0
+        for cell in row {
+            if col_in_slots(ci, v0, v1, v2, v3) {
+                var h int = parse_dec_hundredths(cell)
+                if h == DEC_ERR_SYNTAX {
+                    return err_json("err_cell", row_no, ci, "cell is not a valid number: " + cell)
+                }
+                if h == DEC_ERR_RANGE {
+                    return err_json("err_value_range", row_no, ci, "value out of range (limit 10000000): " + cell)
+                }
+            }
+            ci = ci + 1
+        }
+    }
+    return "{\"ok\":true}"
+}
+
+// ═══════════════════════════════════════════════════════════
+// 柱图 SVG 渲染（几何合同冻结供 V-02 oracle 同式复算）
+// ═══════════════════════════════════════════════════════════
+
+const PALETTE0 = "#2563eb"
+const PALETTE1 = "#16a34a"
+const PALETTE2 = "#d97706"
+const PALETTE3 = "#dc2626"
+
+pub fn svg_escape(s str) str {
+    var out str = s
+    if out.find("&") >= 0 {
+        out = out.replace("&", "&amp;")
+    }
+    if out.find("<") >= 0 {
+        out = out.replace("<", "&lt;")
+    }
+    if out.find(">") >= 0 {
+        out = out.replace(">", "&gt;")
+    }
+    if out.find("\"") >= 0 {
+        out = out.replace("\"", "&quot;")
+    }
+    return out
+}
+
+/// 百位定点 h → SVG y 坐标（float 域；绘图区 y 20..260，240px 高）。
+fn y_of_h(h int, vmin_h int, span_h int) float {
+    var hf float = h
+    var vminf float = vmin_h
+    var spanf float = span_h
+    var diff float = hf - vminf
+    var frac float = diff / spanf
+    var y float = 260.0 - frac * 240.0
+    return y
+}
+
+/// 渲染独立 SVG。headers_frag/rows_frag：csv.parse_csv_parts 的数组
+/// JSON 串；index_col + 四系列列槽（-1 = 缺席，c0 必须在场）。
+/// 返回 SVG 文本；数据/映射非法返回空串（导出端先 validate_rows，
+/// 这里防御性再查）。
+pub fn render_bar_svg(headers_frag str, rows_frag str, index_col int, c0 int, c1 int, c2 int, c3 int) str {
+    if c0 < 0 {
+        return ""
+    }
+    if index_col < 0 {
+        return ""
+    }
+    var rows = json.parse(rows_frag)
+    var headers = json.parse(headers_frag)
+    var h0 str = ""
+    var h1 str = ""
+    var h2 str = ""
+    var h3 str = ""
+    var hi int = 0
+    for hname in headers {
+        if hi == c0 {
+            h0 = hname
+        }
+        if hi == c1 {
+            if c1 >= 0 {
+                h1 = hname
+            }
+        }
+        if hi == c2 {
+            if c2 >= 0 {
+                h2 = hname
+            }
+        }
+        if hi == c3 {
+            if c3 >= 0 {
+                h3 = hname
+            }
+        }
+        hi = hi + 1
+    }
+    // ---- Pass 1：行数 + 值域（含 0）----
+    var n int = 0
+    var vmin_h int = 0
+    var vmax_h int = 0
+    for row in rows {
+        n = n + 1
+        var ci int = 0
+        for cell in row {
+            if col_in_slots(ci, c0, c1, c2, c3) {
+                var h int = parse_dec_hundredths(cell)
+                if h == DEC_ERR_SYNTAX {
+                    return ""
+                }
+                if h == DEC_ERR_RANGE {
+                    return ""
+                }
+                if h < vmin_h {
+                    vmin_h = h
+                }
+                if h > vmax_h {
+                    vmax_h = h
+                }
+            }
+            ci = ci + 1
+        }
+    }
+    if n == 0 {
+        return ""
+    }
+    var span_h int = vmax_h - vmin_h
+    if span_h <= 0 {
+        vmin_h = 0
+        vmax_h = 100
+        span_h = 100
+    }
+    // ---- 阶梯步长 {1,2,5}·10^k，百位定点整数 ----
+    var raw int = span_h / 4
+    if raw < 1 {
+        raw = 1
+    }
+    var step_h int = 0
+    var base int = 1
+    var guard int = 0
+    while step_h == 0 {
+        if base >= raw {
+            step_h = base
+        }
+        if step_h == 0 {
+            if base * 2 >= raw {
+                step_h = base * 2
+            }
+        }
+        if step_h == 0 {
+            if base * 5 >= raw {
+                step_h = base * 5
+            }
+        }
+        base = base * 10
+        guard = guard + 1
+        if guard > 12 {
+            step_h = base
+        }
+    }
+    // ---- 系列槽压缩（在场槽位紧凑编号）----
+    var ks int = 1
+    if c1 >= 0 {
+        ks = ks + 1
+    }
+    if c2 >= 0 {
+        ks = ks + 1
+    }
+    if c3 >= 0 {
+        ks = ks + 1
+    }
+    var k1 int = -1
+    var k2 int = -1
+    var k3 int = -1
+    if c1 >= 0 {
+        k1 = 1
+    }
+    if c2 >= 0 {
+        if k1 >= 0 {
+            k2 = 2
+        } else {
+            k2 = 1
+        }
+    }
+    if c3 >= 0 {
+        if k2 >= 0 {
+            k3 = 3
+        } else {
+            if k1 >= 0 {
+                k3 = 2
+            } else {
+                k3 = 1
+            }
+        }
+    }
+    // ---- SVG 装配 ----
+    var s str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+    s = s + "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 560 300\" width=\"560\" height=\"300\" font-family=\"sans-serif\">\n"
+    // 刻度与网格
+    var m int = vmin_h / step_h
+    if vmin_h - m * step_h != 0 {
+        if vmin_h > 0 {
+            m = m + 1
+        }
+    }
+    var tick int = m * step_h
+    var guard2 int = 0
+    while tick <= vmax_h {
+        var yt float = y_of_h(tick, vmin_h, span_h)
+        var yts str = yt.to_string()
+        var lbl str = format_hundredths(tick)
+        s = s + "<line x1=\"40\" y1=\"" + yts + "\" x2=\"550\" y2=\"" + yts + "\" stroke=\"#e2e8f0\" stroke-width=\"1\"/>\n"
+        s = s + "<text x=\"34\" y=\"" + (yt + 3.5).to_string() + "\" text-anchor=\"end\" font-size=\"10\" fill=\"#64748b\">" + lbl + "</text>\n"
+        tick = tick + step_h
+        guard2 = guard2 + 1
+        if guard2 > 24 {
+            break
+        }
+    }
+    // 轴
+    var ytop_axis float = y_of_h(vmax_h, vmin_h, span_h)
+    var ybase_axis float = y_of_h(vmin_h, vmin_h, span_h)
+    var y0 float = y_of_h(0, vmin_h, span_h)
+    var y0s str = y0.to_string()
+    s = s + "<line x1=\"40\" y1=\"" + ytop_axis.to_string() + "\" x2=\"40\" y2=\"" + ybase_axis.to_string() + "\" stroke=\"#94a3b8\" stroke-width=\"1\"/>\n"
+    s = s + "<line x1=\"40\" y1=\"" + y0s + "\" x2=\"550\" y2=\"" + y0s + "\" stroke=\"#94a3b8\" stroke-width=\"1\"/>\n"
+    // 柱：槽内并列，x 毫像素整型预算后经 float 输出
+    var nf float = n
+    var slot float = 510.0 / nf
+    var ksf float = ks
+    var barw float = slot * 0.6 / ksf
+    var i int = 0
+    var fi float = 0.0
+    for row2 in rows {
+        var ci2 int = 0
+        var cat str = ""
+        for cell2 in row2 {
+            if ci2 == index_col {
+                cat = cell2
+            }
+            var k int = -1
+            if ci2 == c0 {
+                k = 0
+            }
+            if ci2 == c1 {
+                if k1 >= 0 {
+                    k = k1
+                }
+            }
+            if ci2 == c2 {
+                if k2 >= 0 {
+                    k = k2
+                }
+            }
+            if ci2 == c3 {
+                if k3 >= 0 {
+                    k = k3
+                }
+            }
+            if k >= 0 {
+                var h3 int = parse_dec_hundredths(cell2)
+                var yv float = y_of_h(h3, vmin_h, span_h)
+                var rect_y float = yv
+                var rect_h float = y0 - yv
+                if h3 < 0 {
+                    rect_y = y0
+                    rect_h = yv - y0
+                }
+                var xf float = 40.0 + fi * slot + slot * 0.2 + k * barw
+                var col str = PALETTE0
+                if k == 1 {
+                    col = PALETTE1
+                }
+                if k == 2 {
+                    col = PALETTE2
+                }
+                if k == 3 {
+                    col = PALETTE3
+                }
+                s = s + "<rect x=\"" + xf.to_string() + "\" y=\"" + rect_y.to_string() + "\" width=\"" + barw.to_string() + "\" height=\"" + rect_h.to_string() + "\" fill=\"" + col + "\"/>\n"
+            }
+            ci2 = ci2 + 1
+        }
+        // 类别标签（≤20 等距抽样，同组件合同）
+        var kl int = n
+        if kl > 20 {
+            kl = 20
+        }
+        var den int = 1
+        if kl > 1 {
+            den = kl - 1
+        }
+        if i < kl {
+            var tgt int = i * (n - 1) / den
+            if i == tgt {
+                var cx float = 40.0 + fi * slot + slot * 0.5
+                s = s + "<text x=\"" + cx.to_string() + "\" y=\"278\" text-anchor=\"middle\" font-size=\"10\" fill=\"#64748b\">" + svg_escape(cat) + "</text>\n"
+            }
+        }
+        i = i + 1
+        fi = fi + 1.0
+    }
+    // 图例（在场系列，左起横排：色块 + 表头列名）
+    var lx float = 40.0
+    if c0 >= 0 {
+        s = s + "<rect x=\"" + lx.to_string() + "\" y=\"6\" width=\"10\" height=\"10\" fill=\"" + PALETTE0 + "\"/>\n"
+        s = s + "<text x=\"" + (lx + 14.0).to_string() + "\" y=\"15\" font-size=\"11\" fill=\"#334155\">" + svg_escape(h0) + "</text>\n"
+        lx = lx + 90.0
+    }
+    if c1 >= 0 {
+        s = s + "<rect x=\"" + lx.to_string() + "\" y=\"6\" width=\"10\" height=\"10\" fill=\"" + PALETTE1 + "\"/>\n"
+        s = s + "<text x=\"" + (lx + 14.0).to_string() + "\" y=\"15\" font-size=\"11\" fill=\"#334155\">" + svg_escape(h1) + "</text>\n"
+        lx = lx + 90.0
+    }
+    if c2 >= 0 {
+        s = s + "<rect x=\"" + lx.to_string() + "\" y=\"6\" width=\"10\" height=\"10\" fill=\"" + PALETTE2 + "\"/>\n"
+        s = s + "<text x=\"" + (lx + 14.0).to_string() + "\" y=\"15\" font-size=\"11\" fill=\"#334155\">" + svg_escape(h2) + "</text>\n"
+        lx = lx + 90.0
+    }
+    if c3 >= 0 {
+        s = s + "<rect x=\"" + lx.to_string() + "\" y=\"6\" width=\"10\" height=\"10\" fill=\"" + PALETTE3 + "\"/>\n"
+        s = s + "<text x=\"" + (lx + 14.0).to_string() + "\" y=\"15\" font-size=\"11\" fill=\"#334155\">" + svg_escape(h3) + "</text>\n"
+        lx = lx + 90.0
+    }
+    s = s + "</svg>\n"
+    return s
+}
+
+// ═══════════════════════════════════════════════════════════
+// 源读取（导入/保存/按源导出共用的 choke point）
+// ═══════════════════════════════════════════════════════════
+
+const MAX_FILE_BYTES = 10485760
+
+/// 读源 CSV 并解析为 parts 信封；错误为 {"ok":false,...} 信封。
+pub fn read_source_parts(source_path str) str {
+    var p str = source_path.trim()
+    if p == "" {
+        return err_json("err_no_path", 0, 0, "source path is empty")
+    }
+    var ex bool = fsx_exists(p)
+    if ex == false {
+        return err_json("err_not_found", 0, 0, "file not found: " + p)
+    }
+    var isdir bool = fsx_is_dir(p)
+    if isdir {
+        return err_json("err_is_dir", 0, 0, "path is a directory: " + p)
+    }
+    var size int = fs.file_size(p)
+    if size > MAX_FILE_BYTES {
+        return err_json("err_file_too_large", 0, 0, "file exceeds 10MiB limit")
+    }
+    var text str = ""
+    var failed bool = false
+    try {
+        text = fs.read_text(p)
+    } catch {
+        failed = true
+    }
+    if failed {
+        return err_json("err_read", 0, 0, "file could not be read as UTF-8 text: " + p)
+    }
+    return csv.parse_csv_parts(text)
+}
+
+// ═══════════════════════════════════════════════════════════
+// 工程存储（版本化：schema_version=1，数据以转义片段内嵌）
+// ═══════════════════════════════════════════════════════════
+
+fn write_err(code int) str {
+    if code == -2 {
+        return err_json("err_write", 0, 0, "target path is a directory")
+    }
+    if code == -3 {
+        return err_json("err_write", 0, 0, "existing content unreadable/empty; refusing to overwrite")
+    }
+    if code == -4 {
+        return err_json("err_write", 0, 0, "backup before write failed")
+    }
+    if code == -5 {
+        return err_json("err_write", 0, 0, "staged write verification failed")
+    }
+    return err_json("err_write", 0, 0, "file write verification failed")
+}
+
+/// 保存工程：读源 → 校验 → 内嵌全量数据落盘 projects/<slug>.json。
+/// 同名（trim 相等）保存回同一 slug 覆盖；slug 被其他名占用 → err_exists。
+pub fn save_project(name str, source_path str, index_col int, v0 int, v1 int, v2 int, v3 int) str {
+    var nm str = name.trim()
+    if nm == "" {
+        return err_json("err_name", 0, 0, "project name is empty")
+    }
+    if nm.len() > 64 {
+        return err_json("err_name", 0, 0, "project name longer than 64 chars")
+    }
+    var parts str = read_source_parts(source_path)
+    var pt = json.parse(parts)
+    if pt.ok == false {
+        return parts
+    }
+    var rows_frag str = pt.rows_frag
+    var col_count int = pt.col_count
+    var vres str = validate_rows(rows_frag, col_count, index_col, v0, v1, v2, v3)
+    var vr = json.parse(vres)
+    if vr.ok == false {
+        return vres
+    }
+    var slug str = slug_of(nm)
+    var ppath str = projects_path(slug)
+    var pex bool = fsx_exists(ppath)
+    if pex {
+        var existing str = fs.read_text(ppath)
+        var same bool = false
+        try {
+            var ex = json.parse(existing)
+            var exname str = ex.name
+            if exname.trim() == nm {
+                same = true
+            }
+        } catch {
+            same = false
+        }
+        if same == false {
+            return err_json("err_exists", 0, 0, "a different project already uses this name")
+        }
+    }
+    var doc str = "{\"schema_version\":1,\"name\":\"" + csv.json_escape_cell(nm)
+    doc = doc + "\",\"slug\":\"" + csv.json_escape_cell(slug) + "\""
+    doc = doc + ",\"source_path\":\"" + csv.json_escape_cell(source_path.trim()) + "\""
+    var icol str = index_col.to_string()
+    doc = doc + ",\"index_col\":" + icol
+    doc = doc + ",\"value_cols\":[" + v0.to_string() + "," + v1.to_string() + "," + v2.to_string() + "," + v3.to_string() + "]"
+    doc = doc + ",\"created_at\":\"\""
+    doc = doc + ",\"headers_frag\":\"" + csv.json_escape_cell(pt.headers_frag) + "\""
+    doc = doc + ",\"rows_frag\":\"" + csv.json_escape_cell(rows_frag) + "\""
+    doc = doc + ",\"row_count\":" + pt.row_count.to_string()
+    doc = doc + ",\"col_count\":" + col_count + "}"
+    var mk bool = fsx_mkdir_all(projects_dir())
+    if mk == false {
+        var mdir bool = fsx_is_dir(projects_dir())
+        if mdir == false {
+            return err_json("err_write", 0, 0, "projects directory not writable")
+        }
+    }
+    var wrc int = write_with_backup(ppath, doc)
+    if wrc != 0 {
+        return write_err(wrc)
+    }
+    return "{\"ok\":true,\"id\":\"" + csv.json_escape_cell(slug) + "\",\"path\":\"" + csv.json_escape_cell(ppath) + "\"}"
+}
+
+fn ends_with_json(name str) bool {
+    var n int = name.len()
+    if n < 6 {
+        return false
+    }
+    if name.substr(n - 5, 5) == ".json" {
+        return true
+    }
+    return false
+}
+
+/// 工程列表。损坏文件以 {"id":..,"corrupt":true} 在列（不静默丢弃）。
+pub fn list_projects() str {
+    var pdir str = projects_dir()
+    var out str = ""
+    var listed int = 0
+    var corrupt int = 0
+    var ldir bool = fsx_is_dir(pdir)
+    if ldir {
+        var names List<str> = fs.dir_names(pdir)
+        for name in names {
+            if ends_with_json(name) {
+                var id str = name.substr(0, name.len() - 5)
+                var raw str = fs.read_text(pdir + "/" + name)
+                var entry_ok bool = false
+                var entry str = ""
+                try {
+                    var p = json.parse(raw)
+                    var nm str = p.name
+                    var rc int = p.row_count
+                    var cc int = p.col_count
+                    var sv int = p.schema_version
+                    if sv == 1 {
+                        entry = "{\"id\":\"" + csv.json_escape_cell(id) + "\",\"name\":\"" + csv.json_escape_cell(nm) + "\",\"row_count\":" + rc.to_string() + ",\"col_count\":" + cc.to_string() + ",\"corrupt\":false}"
+                        entry_ok = true
+                    }
+                } catch {
+                    entry_ok = false
+                }
+                if entry_ok == false {
+                    entry = "{\"id\":\"" + csv.json_escape_cell(id) + "\",\"corrupt\":true}"
+                    corrupt = corrupt + 1
+                }
+                if listed == 0 {
+                    out = entry
+                } else {
+                    out = out + "," + entry
+                }
+                listed = listed + 1
+            }
+        }
+    }
+    var lc str = listed.to_string()
+    var crc str = corrupt.to_string()
+    return "{\"ok\":true,\"projects\":[" + out + "],\"listed\":" + lc + ",\"corrupt\":" + crc + "}"
+}
+
+/// 取单个工程（原始文件内容；损坏/缺失明确报错）。
+pub fn get_project(id str) str {
+    var gid str = id.trim()
+    if gid == "" {
+        return err_json("err_not_found", 0, 0, "project id is empty")
+    }
+    if gid.find("/") >= 0 {
+        return err_json("err_not_found", 0, 0, "project id contains path separator")
+    }
+    if gid.find("\\") >= 0 {
+        return err_json("err_not_found", 0, 0, "project id contains path separator")
+    }
+    if gid.find("..") >= 0 {
+        return err_json("err_not_found", 0, 0, "project id contains path traversal")
+    }
+    var ppath str = projects_path(gid)
+    var gex bool = fsx_exists(ppath)
+    if gex == false {
+        return err_json("err_not_found", 0, 0, "project not found: " + gid)
+    }
+    var raw str = ""
+    var failed bool = false
+    try {
+        raw = fs.read_text(ppath)
+    } catch {
+        failed = true
+    }
+    if failed {
+        return err_json("err_corrupt", 0, 0, "project file unreadable: " + gid)
+    }
+    var parsed_ok bool = true
+    try {
+        var chk = json.parse(raw)
+        var sv int = chk.schema_version
+        if sv != 1 {
+            parsed_ok = false
+        }
+    } catch {
+        parsed_ok = false
+    }
+    if parsed_ok == false {
+        return err_json("err_corrupt", 0, 0, "project file is not valid v1 JSON: " + gid)
+    }
+    return raw
+}
+
+// ═══════════════════════════════════════════════════════════
+// 导出（独立 SVG 落盘）
+// ═══════════════════════════════════════════════════════════
+
+/// 导出 SVG。project_id 非空 → 从工程内嵌数据渲染（删源后仍可导出）；
+/// 否则 source_path+映射 现读现渲。out_path 空 → exports/<slug>.svg。
+pub fn export_svg(project_id str, source_path str, name str, index_col int, v0 int, v1 int, v2 int, v3 int, out_path str) str {
+    var headers_frag str = ""
+    var rows_frag str = ""
+    var col_count int = 0
+    var slug_base str = ""
+    var pid str = project_id.trim()
+    if pid != "" {
+        var raw str = get_project(pid)
+        var r = json.parse(raw)
+        if r.ok == false {
+            return raw
+        }
+        headers_frag = r.headers_frag
+        rows_frag = r.rows_frag
+        col_count = r.col_count
+        slug_base = pid
+    } else {
+        var parts str = read_source_parts(source_path)
+        var pt = json.parse(parts)
+        if pt.ok == false {
+            return parts
+        }
+        headers_frag = pt.headers_frag
+        rows_frag = pt.rows_frag
+        col_count = pt.col_count
+        var nm str = name.trim()
+        if nm == "" {
+            slug_base = "chart"
+        } else {
+            slug_base = slug_of(nm)
+        }
+    }
+    var vres str = validate_rows(rows_frag, col_count, index_col, v0, v1, v2, v3)
+    var vr = json.parse(vres)
+    if vr.ok == false {
+        return vres
+    }
+    var svg str = render_bar_svg(headers_frag, rows_frag, index_col, v0, v1, v2, v3)
+    if svg == "" {
+        return err_json("err_render", 0, 0, "svg rendering produced no output")
+    }
+    var target str = out_path.trim()
+    if target == "" {
+        var edir str = exports_dir()
+        var mk bool = fsx_mkdir_all(edir)
+        if mk == false {
+            var edir_ok bool = fsx_is_dir(edir)
+            if edir_ok == false {
+                return err_json("err_export_write", 0, 0, "exports directory not writable")
+            }
+        }
+        target = edir + "/" + slug_base + ".svg"
+    }
+    var tdir bool = fsx_is_dir(target)
+    if tdir {
+        return err_json("err_export_write", 0, 0, "export target is a directory: " + target)
+    }
+    var wrc int = write_with_backup(target, svg)
+    if wrc != 0 {
+        return write_err(wrc)
+    }
+    var chars str = svg.len().to_string()
+    return "{\"ok\":true,\"path\":\"" + csv.json_escape_cell(target) + "\",\"chars\":" + chars + "}"
+}

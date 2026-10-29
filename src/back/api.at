@@ -1,0 +1,78 @@
+// src/back/api.at — Charts 基础能力 API（CHARTS-001 T-02）
+//
+// 端点均为薄封装（数据/校验/存储逻辑在 csv.at / chart_project.at）；
+// 返回 JSON 字符串（动态数据面，reader T-01 同款裁定：非 api 模块不构
+// 造 api 端点类型，VM/a2r 缺陷规避）。预算与错误码见
+// docs/plans/evidence/001/capability-decision.md §5。
+
+use chart_project
+use csv
+
+/// 诊断状态（数据目录、版本）。
+#[api(method = "GET", path = "/api/v1/status")]
+pub fn status() str {
+    var dd str = chart_project.data_dir()
+    return "{\"ok\":true,\"app\":\"charts\",\"api\":\"v1b\",\"data_dir\":\"" + csv.json_escape_cell(dd) + "\"}"
+}
+
+/// 导入 CSV：读源文件并解析（结构校验：BOM/引号/换行/行列预算）。
+/// 返回 parse_csv_parts 信封（headers_frag/rows_frag 为转义 JSON 数组串，
+/// 前端二次 json.parse 取数组）。
+#[api(method = "POST", path = "/api/v1/import")]
+pub fn import_csv(path str) str {
+    return chart_project.read_source_parts(path)
+}
+
+/// 校验映射：类别列 + 数值列（v1..v3 可 -1）+ 全部所选单元格数值。
+#[api(method = "POST", path = "/api/v1/validate")]
+pub fn validate_mapping(path str, index_col int, v0 int, v1 int, v2 int, v3 int) str {
+    var parts str = chart_project.read_source_parts(path)
+    var pt = json.parse(parts)
+    if pt.ok == false {
+        return parts
+    }
+    return chart_project.validate_rows(pt.rows_frag, pt.col_count, index_col, v0, v1, v2, v3)
+}
+
+/// 保存工程（内嵌全量数据，删源后可重开；同名覆盖、异名冲突明确报错）。
+#[api(method = "POST", path = "/api/v1/save")]
+pub fn save_project(name str, path str, index_col int, v0 int, v1 int, v2 int, v3 int) str {
+    return chart_project.save_project(name, path, index_col, v0, v1, v2, v3)
+}
+
+/// 工程列表。
+#[api(method = "GET", path = "/api/v1/projects")]
+pub fn list_projects() str {
+    return chart_project.list_projects()
+}
+
+/// 单个工程（原始 v1 JSON；缺失/损坏明确报错）。
+#[api(method = "GET", path = "/api/v1/projects/:id")]
+pub fn get_project(id str) str {
+    return chart_project.get_project(id)
+}
+
+/// 导出独立 SVG：project_id 非空走工程内嵌数据（删源后仍可导出）；
+/// 否则按 source path+映射现读现渲。out_path 空 → exports/<slug>.svg。
+#[api(method = "POST", path = "/api/v1/export")]
+pub fn export_svg(project_id str, path str, name str, index_col int, v0 int, v1 int, v2 int, v3 int, out_path str) str {
+    return chart_project.export_svg(project_id, path, name, index_col, v0, v1, v2, v3, out_path)
+}
+
+/// 临时探针（T-02 调试用，验收前移除）：fs/str 语义观测。
+#[api(method = "GET", path = "/api/v1/debug")]
+pub fn debug_semantics() str {
+    var dir str = chart_project.data_dir() + "/fsx-debug"
+    var mk = fs.mkdir_all(dir)
+    var mks = mk.to_string()
+    var wr = fs.write_text(dir + "/t.txt", "hello")
+    var wrs = wr.to_string()
+    var rd str = fs.read_text(dir + "/t.txt")
+    var same str = "diff"
+    if rd == "hello" {
+        same = "same"
+    }
+    var t1 = fs.write_text(dir + "/u.txt", "x")
+    var t1k = "int"
+    return "{\"mk_tos\":\"" + mks + "\",\"wr_tos\":\"" + wrs + "\",\"rd\":\"" + rd + "\",\"same\":\"" + same + "\",\"t1_tos\":\"" + t1.to_string() + "\"}"
+}

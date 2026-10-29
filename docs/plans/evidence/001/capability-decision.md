@@ -33,6 +33,19 @@
 - 前端调后端：`Http.get_json/post/put/delete`（双轨可用；`use back.api` 在 VM 轨不可解析——reader PLAN-043 先例）；VM handler 由调度器 park/resume，HTTP 调用不冻结 UI。
 - 前端 widget：`input`（value/oninput(str msg)/onenter/placeholder）、`button`、`checkbox`、`text`、`svg` 直通——导入路径输入、列映射、导出路径输入均无需新 widget。
 
+### 3.1 T-02 实测补充（本仓 VM service 实测，非转述）
+
+| 发现 | 证据 | 纪律 |
+|---|---|---|
+| `fs.exists/is_dir` 返回 **int 0/1**（谓词风格），`int == bool` 恒不等 | debug 端点 `ex_missing:0`、`b1_typed:0`、`b1_cmp:"ne-false"` | 一律经 `fsx_exists/fsx_is_dir` 包装归一为 bool |
+| `fs.write_text/mkdir_all` 返回 **errno 风格 int（0=成功）** | `wr_tos:"0"` 且文件实际写入成功 | `fsx_write/fsx_mkdir_all` 包装（0→true），读回校验兜底 |
+| `fs.read_text` 对缺失文件**静默返回空串**（不抛） | `txt_missing:"len=0"` | 读前必须 exists 守卫 |
+| `str.substr` 按字节切（CJK 多字节字段切片比对 1 字节 ≠ 多字节 BOM） | BOM 字面量在源码中仍逃过 `substr(0,1)==bom()` | BOM 判定用 `substr(0,3)` 双形态兼容；长度上限按字节语义理解 |
+| `json.parse` 的 JSON `true/false` 落为 **bool**，与字符串 `"true"` 比较恒不等 | save/export 曾提前返回 parts 信封 | ok 判定一律 `== false` bool 字面量 |
+| str 返回端点 HTTP 体为**双层编码** JSON 字符串 | import 响应体外层引号 | 前端 `Http.post` 解析一次后再 `json.parse`（reader 同款） |
+| `auto service --server vm` 每次启动**即时解析 src/back/api.at**（改码即生效，无需构建），7 路由注册 | 改 status 标记 v1→v1b 即时反映 | 探针/验收以 service 直启为准 |
+| `auto service` 缺省绑定 127.0.0.1:8080（AUTO_HTTP_PORT 不作用于该子命令） | 启动日志 | 探针脚本显式传 base_url |
+
 ## 4. 现有柱图组件能力边界（T-03 输入）
 
 - `bar_chart.at`：band scale，vmax 仅从 0 向上取正 max；负值 ytop 越界 viewBox、全负数据 domain 退化为 4 且刻度无负半轴；零值正常（零高柱）。

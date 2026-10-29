@@ -106,7 +106,7 @@ T-02..04按下列任务依赖顺序推进；T-05将本节拟议测试做成真�
 ## 8. 执行步骤
 
 - [x] T-01（owner_stage=work；依赖 无；AC-01..04）：基线与全路径探针：验证文件选择或显式路径读取、健全CSV解析、版本化工程存储、当前柱图组件的值域/负值/零值处理和SVG真实输出；冻结数据/资源预算。不能用 split(逗号) 代替约定CSV输入，也不以截图充当图表导出。若需后端，17851 为候选。 输出新文件 `docs/plans/evidence/001/capability-decision.md`，记录可用API、版本/资源边界、缺项owner和最小闭环。[✅ 已完成]（2026-10-29：决策文档已落盘；auto CLI=v0.0.20-117；VM轨 run+MCP 实测通过（port 19511 state/snapshot）；vue轨需 AUTO_BACKEND_IMPL=vm + back_port:17851（pac.at 已加）；vue build 25 TS 错=生成器推断缺陷 G-2（donut 形态规避）；负值柱图越界 G-4→T-03 扩符号域；预算冻结：10MiB/万行/64列/1..4数值列/拒绝式）
-- [ ] T-02（owner_stage=work；依赖 T-01；AC-01..04）：输入与项目数据：新增 CSV/图表项目模块及接口（拟议 src/back/csv.at / chart_project.at / api.at）；数据与列映射校验，保存可恢复的工程。
+- [x] T-02（owner_stage=work；依赖 T-01；AC-01..04）：输入与项目数据：新增 CSV/图表项目模块及接口（拟议 src/back/csv.at / chart_project.at / api.at）；数据与列映射校验，保存可恢复的工程。[✅ 已完成]（2026-10-29：三模块落地+tests/basic/probe_api.py 35/35 PASS（`auto service --server vm` 直启，AUTO_CHARTS_DATA 隔离）；RFC4180/BOM/引号换行/行列错误定位/坏单元格行列/工程保存列表读取/同名覆盖/异名冲突/按工程与按源导出/删源后导出全通；运行时语义发现（fs int 谓词+errno 写、substr 字节切、json.parse bool）记入 capability-decision §3.1；commit 见 git log）
 - [ ] T-03（owner_stage=work；依赖 T-02；AC-01..04）：图表与输出：复用 components/bar_chart.at，确认从真实数据映射到几何；保存规格并导出独立 SVG，类别/中文/XML特殊字符正确。
 - [ ] T-04（owner_stage=work；依赖 T-03；AC-01..04）：界面去演示化：增加导入、列映射、保存重开/导出和错误状态；样例仅显式入口，普通启动空态；用户数据模式不再由模拟Tick覆盖。
 - [ ] T-05（owner_stage=work；依赖 T-02..04；AC-01..04）：完成独立数据/失败回放和两端真实UI验收，新建 `tests/basic/verify_basic.py` 调度入口（可复用既有脚本），同时保存命令/输入hash/真实结果与原始失败；准备 canonical Spec 增量，提交实现，转 execution_done。

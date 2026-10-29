@@ -1,0 +1,306 @@
+// src/back/csv.at — RFC4180 CSV 解析器（CHARTS-001 T-02）
+//
+// 预算与语义（T-01 冻结，docs/plans/evidence/001/capability-decision.md §5）：
+//   - UTF-8（BOM 可选，剥除）；引号内逗号/换行/双引号转义（""→"）逐字保留
+//   - 引号外 \r\n / \n / 孤立 \r 均结束记录；引号内换行逐字保留（无预归一）
+//   - 表头 = 首记录；后续记录列数必须与表头一致，违例报 err_shape（记录号）
+//   - 数据行 ≤ 10000、列 ≤ 64，越界拒绝（err_too_many_rows / err_too_many_cols）
+//   - 空文件 / 仅空白 → err_empty；引号闭合后跟杂散字符 → err_quote（定位）
+//   - 引号不在字段首位 → 按字面数据字符（宽容，Spec delta 记录）
+//   - err_row 为文件内记录号（表头=1，首条数据=2）；shape 错误 err_col=0
+//
+// 结构：.at 无局部 fn（VM 纪律），单记录扫描器 scan_one_record 以 JSON
+// 信封返回 {err,frag,count,next}（frag 为已转义的 JSON 数组片段），
+// parse_csv 主循环逐记录消费。逐字符 substr 扫描沿用 reader jsonx 先例
+// （VM 后端 str.find 无起始位参数）。输出 JSON 手工转义（json.encode 对
+// 动态容器在 VM 轨只回内部句柄——T-01 G-4），读侧 json.parse 消费。
+
+const MAX_ROWS = 10000
+const MAX_COLS = 64
+
+/// BOM 字符 U+FEFF（源码内嵌字面量，勿“清理”为可见空白）。
+fn bom() str {
+    return "﻿"
+}
+
+pub fn json_escape_cell(s str) str {
+    var out str = s
+    if out.find("\\") >= 0 {
+        out = out.replace("\\", "\\\\")
+    }
+    if out.find("\"") >= 0 {
+        out = out.replace("\"", "\\\"")
+    }
+    if out.find("\n") >= 0 {
+        out = out.replace("\n", "\\n")
+    }
+    if out.find("\r") >= 0 {
+        out = out.replace("\r", "\\r")
+    }
+    if out.find("\t") >= 0 {
+        out = out.replace("\t", "\\t")
+    }
+    return out
+}
+
+fn err_json(code str, row int, col int, detail str) str {
+    var d str = json_escape_cell(detail)
+    var r str = row.to_string()
+    var c str = col.to_string()
+    return "{\"ok\":false,\"err_code\":\"" + code + "\",\"err_row\":" + r + ",\"err_col\":" + c + ",\"detail\":\"" + d + "\"}"
+}
+
+fn rec_ok(frag str, count int, next int) str {
+    var cs str = count.to_string()
+    var ns str = next.to_string()
+    return "{\"err\":\"\",\"err_code\":\"\",\"err_row\":0,\"err_col\":0,\"detail\":\"\",\"frag\":\"" + json_escape_cell(frag) + "\",\"count\":" + cs + ",\"next\":" + ns + "}"
+}
+
+fn rec_err(code str, row int, col int, detail str) str {
+    var d str = json_escape_cell(detail)
+    var r str = row.to_string()
+    var c str = col.to_string()
+    return "{\"err\":\"" + code + "\",\"err_code\":\"" + code + "\",\"err_row\":" + r + ",\"err_col\":" + c + ",\"detail\":\"" + d + "\",\"frag\":\"\",\"count\":0,\"next\":-1}"
+}
+
+/// 扫描自 start 起的一条记录。返回 rec_ok/rec_err 信封；
+/// next=-1 表示「空白记录，无输出」（文件以换行结束时的收尾）。
+fn scan_one_record(t str, n int, start int) str {
+    var pos int = start
+    var frag str = ""
+    var count int = 0
+    var field_start int = start
+    var state str = "field"
+    var has_content bool = false
+    while pos < n {
+        var c str = t.substr(pos, 1)
+        if state == "quoted" {
+            if c == "\"" {
+                var is_escaped bool = false
+                if pos + 1 < n {
+                    if t.substr(pos + 1, 1) == "\"" {
+                        is_escaped = true
+                    }
+                }
+                if is_escaped {
+                    pos = pos + 2
+                    has_content = true
+                    continue
+                }
+                var raw str = t.substr(field_start, pos - field_start)
+                var cell str = raw.replace("\"\"", "\"")
+                if count > 0 {
+                    frag = frag + "," + "\"" + json_escape_cell(cell) + "\""
+                } else {
+                    frag = "\"" + json_escape_cell(cell) + "\""
+                }
+                count = count + 1
+                state = "after_quote"
+                pos = pos + 1
+                continue
+            }
+            has_content = true
+            pos = pos + 1
+            continue
+        }
+        if state == "after_quote" {
+            if c == "," {
+                state = "field"
+                field_start = pos + 1
+                has_content = true
+                pos = pos + 1
+                continue
+            }
+            if c == "\n" {
+                return rec_ok(frag, count, pos + 1)
+            }
+            if c == "\r" {
+                if pos + 1 < n {
+                    if t.substr(pos + 1, 1) == "\n" {
+                        return rec_ok(frag, count, pos + 2)
+                    }
+                }
+                return rec_ok(frag, count, pos + 1)
+            }
+            return rec_err("err_quote", 0, count, "stray text after closing quote")
+        }
+        // state == "field"
+        if c == "\"" {
+            if pos == field_start {
+                // 字段首字符即引号 → 引号模式
+                state = "quoted"
+                field_start = pos + 1
+                pos = pos + 1
+                continue
+            }
+            // 宽容：字段中部/后段引号按字面数据字符
+            has_content = true
+            pos = pos + 1
+            continue
+        }
+        if c == "," {
+            var slice str = t.substr(field_start, pos - field_start)
+            if count > 0 {
+                frag = frag + "," + "\"" + json_escape_cell(slice) + "\""
+            } else {
+                frag = "\"" + json_escape_cell(slice) + "\""
+            }
+            count = count + 1
+            field_start = pos + 1
+            has_content = true
+            pos = pos + 1
+            continue
+        }
+        if c == "\n" {
+            var last str = t.substr(field_start, pos - field_start)
+            if count > 0 {
+                frag = frag + "," + "\"" + json_escape_cell(last) + "\""
+            } else {
+                frag = "\"" + json_escape_cell(last) + "\""
+            }
+            count = count + 1
+            return rec_ok(frag, count, pos + 1)
+        }
+        if c == "\r" {
+            var last2 str = t.substr(field_start, pos - field_start)
+            if count > 0 {
+                frag = frag + "," + "\"" + json_escape_cell(last2) + "\""
+            } else {
+                frag = "\"" + json_escape_cell(last2) + "\""
+            }
+            count = count + 1
+            if pos + 1 < n {
+                if t.substr(pos + 1, 1) == "\n" {
+                    return rec_ok(frag, count, pos + 2)
+                }
+            }
+            return rec_ok(frag, count, pos + 1)
+        }
+        has_content = true
+        pos = pos + 1
+    }
+    // ---- EOF 收尾 ----
+    if state == "quoted" {
+        return rec_err("err_quote", 0, count, "unterminated quoted field")
+    }
+    if state == "after_quote" {
+        return rec_ok(frag, count, n)
+    }
+    if count > 0 {
+        // 尾逗号后的空末字段
+        frag = frag + "," + "\"\""
+        count = count + 1
+        return rec_ok(frag, count, n)
+    }
+    if has_content {
+        var last3 str = t.substr(field_start, pos - field_start)
+        frag = "\"" + json_escape_cell(last3) + "\""
+        count = 1
+        return rec_ok(frag, count, n)
+    }
+    return rec_ok("", 0, -1)
+}
+
+/// 解析入口（片段形态）。成功：{"ok":true,"headers_frag":"<转义JSON数组>",
+/// "rows_frag":"<转义JSON数组>","row_count":N,"col_count":C}——frag 为
+/// 转义后的 JSON 数组串，供工程文件以字符串字段内嵌（免动态容器重编码）；
+/// 失败：{"ok":false,"err_code":...}。
+pub fn parse_csv_parts(text str) str {
+    var t str = text
+    if t.trim() == "" {
+        return err_json("err_empty", 0, 0, "input is empty or blank")
+    }
+    // BOM 剥除：substr 字节/字符语义双兼容（字节面取 3 字节，字符面取 1 字符）
+    var is_bom bool = false
+    if t.len() >= 3 {
+        if t.substr(0, 3) == bom() {
+            is_bom = true
+        }
+    }
+    if t.len() >= 1 {
+        if t.substr(0, 1) == bom() {
+            is_bom = true
+        }
+    }
+    if is_bom {
+        var cut int = 3
+        if t.len() < 3 {
+            cut = 1
+        }
+        if t.substr(0, 1) == bom() {
+            cut = 1
+        }
+        t = t.substr(cut, t.len() - cut)
+        if t.trim() == "" {
+            return err_json("err_empty", 0, 0, "input is only a BOM")
+        }
+    }
+    var n int = t.len()
+    var headers_frag str = ""
+    var rows_frag str = ""
+    var header_cols int = -1
+    var data_rows int = 0
+    var pos int = 0
+    var record_no int = 0
+    while pos < n {
+        var rec str = scan_one_record(t, n, pos)
+        var r = json.parse(rec)
+        var ecode str = r.err_code
+        if ecode != "" {
+            return err_json(ecode, r.err_row + record_no + 1, r.err_col, r.detail)
+        }
+        if r.next < 0 {
+            // 空白收尾记录
+            pos = n
+            continue
+        }
+        if r.count > MAX_COLS {
+            return err_json("err_too_many_cols", record_no + 1, r.count, "column limit is 64")
+        }
+        if record_no == 0 {
+            headers_frag = r.frag
+            header_cols = r.count
+        } else {
+            if r.count != header_cols {
+                return err_json("err_shape", record_no + 1, 0, "record has different column count than header")
+            }
+            if data_rows >= MAX_ROWS {
+                return err_json("err_too_many_rows", record_no + 1, 0, "row limit is 10000 data rows")
+            }
+            if data_rows == 0 {
+                rows_frag = "[" + r.frag + "]"
+            } else {
+                rows_frag = rows_frag + "," + "[" + r.frag + "]"
+            }
+            data_rows = data_rows + 1
+        }
+        record_no = record_no + 1
+        pos = r.next
+        if pos <= 0 {
+            pos = n
+        }
+    }
+    if header_cols < 0 {
+        return err_json("err_empty", 0, 0, "no records found")
+    }
+    if header_cols == 0 {
+        return err_json("err_empty", 1, 0, "header record is empty")
+    }
+    var rc str = data_rows.to_string()
+    var cc str = header_cols.to_string()
+    var hf str = "[" + headers_frag + "]"
+    var rf str = "[" + rows_frag + "]"
+    return "{\"ok\":true,\"headers_frag\":\"" + json_escape_cell(hf) + "\",\"rows_frag\":\"" + json_escape_cell(rf) + "\",\"row_count\":" + rc + ",\"col_count\":" + cc + "}"
+}
+
+/// 解析入口（内联形态）。成功：{"ok":true,"headers":[...],"rows":[[...],...],
+/// "row_count":N,"col_count":C}；失败同 parse_csv_parts。
+pub fn parse_csv(text str) str {
+    var parts str = parse_csv_parts(text)
+    var p = json.parse(parts)
+    var okc = p.ok
+    if okc == false {
+        return parts
+    }
+    return "{\"ok\":true,\"headers\":" + p.headers_frag + ",\"rows\":" + p.rows_frag + ",\"row_count\":" + p.row_count.to_string() + ",\"col_count\":" + p.col_count.to_string() + "}"
+}
