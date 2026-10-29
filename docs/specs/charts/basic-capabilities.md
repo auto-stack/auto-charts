@@ -73,6 +73,8 @@
   VM 轨原始 UTF-8 正常。owner：auto-lang。
 - Http body 双轨分歧（G-6a）：vue=对象/VM=字符串 → 本仓 API 全部
   GET+query（标量）。owner：auto-lang。
+- 环形图（非 v1 冻结件）契约：数值需非负且合计 > 0；负值/零合计渲染
+  显式提示文案而非几何；图例/tooltip 标签内 CR/LF 折叠为空格。
 - 单写入者；无跨进程锁；时钟能力缺失期间 `created_at` 为空串。
 - 性能不设承诺：10 MiB/万行在预算内被接受但解析为逐字符扫描，
   不做速度声明。
