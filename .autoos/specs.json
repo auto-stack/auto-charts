@@ -1,0 +1,159 @@
+{
+ "project": "auto-charts",
+ "version": 1,
+ "sections": [
+  {
+   "id": "goals",
+   "items": [
+    {
+     "id": "C001-1",
+     "title": "CHARTS-001 用户数据到图表、保存与导出（v1）",
+     "content": "auto-charts v0.6 基础能力 CHARTS-001 交付完成（r2 复审 pass，2026-10-29，reviewed_commit e3375e2）：真实 CSV 导入（RFC4180，BOM/中文/引号内逗号换行）、列映射校验（行列级负例）、带符号域柱图、版本化工程存储（删源可重开）、独立 SVG 导出；双端真实任务验收 vm 26/26 + vue 10/10、独立几何 oracle 全符。Linux 仍等待发行版前置（计划非目标）。",
+     "status": "Delivered",
+     "depends_on": [],
+     "related": [
+      "CHARTS-001"
+     ],
+     "priority": null,
+     "assignee": null,
+     "test_file": null,
+     "file": "docs/plans/archived/001-data-to-chart.md",
+     "milestone": null,
+     "module": "charts",
+     "tags": [
+      "charts",
+      "CHARTS-001",
+      "r2",
+      "delivered:e3375e2"
+     ],
+     "created_at": 1793283336,
+     "modified_at": 1793283336,
+     "completed_at": 1793283336
+    }
+   ]
+  },
+  {
+   "id": "architecture",
+   "items": []
+  },
+  {
+   "id": "designs",
+   "items": [
+    {
+     "id": "C001-2",
+     "title": "charts 基础能力实现态规范：数据契约/几何合同/边界",
+     "content": "canonical 实现态规范：RFC4180 数据契约（预算拒绝式：10MiB/万行/64列/1..4数值列/|值|≤1e7）；几何合同（带符号值域 y(v)=260-(v-vmin)/span*240、刻度 {1,2,5}·10^k、基线 y(0)、导出坐标 ±0.01px）；定点百位预算；工程 v1 文档与列键去重序（base → base#2）；已声明边界（屏幕端整数几何 G-8、查询 %XX latin-1 G-6b、Http body 双轨分歧 G-6a）。",
+     "status": "Stable",
+     "depends_on": [],
+     "related": [
+      "CHARTS-001"
+     ],
+     "priority": null,
+     "assignee": null,
+     "test_file": null,
+     "file": "docs/specs/charts/basic-capabilities.md",
+     "milestone": null,
+     "module": "charts",
+     "tags": [
+      "charts",
+      "CHARTS-001",
+      "r2"
+     ],
+     "created_at": 1793283336,
+     "modified_at": 1793283336,
+     "completed_at": 1793283336
+    }
+   ]
+  },
+  {
+   "id": "tests",
+   "items": [
+    {
+     "id": "C001-3",
+     "title": "基础能力双端验收与后端探针",
+     "content": "tests/basic/verify_basic.py：--profile vm（真实窗口 MCP 驱动 26 检查）与 --profile vue（Playwright 10 检查）覆盖导入→映射→图表→保存→重开→导出全流程与失败路径；tests/basic/probe_api.py：36 项后端 HTTP 探针（GET+query，含 R-2 去重永久回归）；复审独立几何 oracle：test-results/review_oracle.py（6柱×4坐标独立复算 ±0.01）。全部于 e3375e2 绿。",
+     "status": "Stable",
+     "depends_on": [],
+     "related": [
+      "CHARTS-001"
+     ],
+     "priority": null,
+     "assignee": null,
+     "test_file": "tests/basic/verify_basic.py",
+     "file": "docs/specs/charts/basic-capabilities.md",
+     "milestone": null,
+     "module": "charts",
+     "tags": [
+      "charts",
+      "CHARTS-001",
+      "r2",
+      "verified:e3375e2"
+     ],
+     "created_at": 1793283336,
+     "modified_at": 1793283336,
+     "completed_at": 1793283336
+    }
+   ]
+  },
+  {
+   "id": "reviews",
+   "items": [
+    {
+     "id": "C001-4",
+     "title": "CHARTS-001 r2 最终复审结论（含 R-2 修复复审）",
+     "content": "final 复审（同会话复审，结论由冻结提交工件与独立 oracle 重建）：AC-01..04 全 PASS；独立反例发现 R-2（重复表头去重键跳号 a→a#3）needs_fix → work 修复（自然序 a#2）→ 受影响范围复审 pass；R-3 文档滞留同步修复。独立 oracle 12 检查 0 fail；探针 36/36、vm 26/26、vue 10/10 于修复基线复跑全绿。",
+     "status": "Stable",
+     "depends_on": [],
+     "related": [
+      "CHARTS-001"
+     ],
+     "priority": null,
+     "assignee": null,
+     "test_file": null,
+     "file": "docs/plans/archived/001-data-to-chart.md",
+     "milestone": null,
+     "module": "charts",
+     "tags": [
+      "charts",
+      "CHARTS-001",
+      "r2",
+      "reviewed:e3375e2"
+     ],
+     "created_at": 1793283336,
+     "modified_at": 1793283336,
+     "completed_at": 1793283336
+    }
+   ]
+  },
+  {
+   "id": "reports",
+   "items": [
+    {
+     "id": "C001-5",
+     "title": "CHARTS-001 存档报告（v0.6 B类首项交付之一）",
+     "content": "交付存档：main 线性历史 cc4b5dc..e3375e2（8 提交）已推送 origin；canonical 规范 docs/specs/charts/basic-capabilities.md；计划归档 docs/plans/archived/001-data-to-chart.md；框架缺口（G-1..G-8）登记于 capability-decision.md 供跨仓处置；父仓 auto-os main gitlink 由 d5f5535 升至 e3375e2，总表 Charts → A。",
+     "status": "Delivered",
+     "depends_on": [],
+     "related": [
+      "CHARTS-001"
+     ],
+     "priority": null,
+     "assignee": null,
+     "test_file": null,
+     "file": "docs/plans/archived/001-data-to-chart.md",
+     "milestone": null,
+     "module": "charts",
+     "tags": [
+      "charts",
+      "CHARTS-001",
+      "r2",
+      "delivered:e3375e2"
+     ],
+     "created_at": 1793283336,
+     "modified_at": 1793283336,
+     "completed_at": 1793283336
+    }
+   ]
+  }
+ ]
+}
