@@ -55,7 +55,8 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
         yTick2 str = ""
         yTick1 str = ""
         yTick0 str = ""
-        gridPath str = "M40 200 H550 M40 140 H550 M40 80 H550 M40 20 H550"
+        gridPath str = ""
+        baselineY str = "260"
         legendColor0 str = ""
         legendText0 str = ""
         legendColor1 str = ""
@@ -74,9 +75,11 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
 
     on {
         .Init -> {
-            // ---- 域:type prop 直接选——stacked 取逐 index 累计和最大,
-            //      grouped 取系列值最大 ----
+            // ---- 域(type prop 直接选) + 符号值域:带符号 vmin/vmax,
+            //      与后端导出 SVG 同一几何合同(y(v)=260-(v-vmin)/span*240,
+            //      刻度阶梯 {1,2,5}·10^k,基线 y0=y(0)) ----
             var vmax int = 0
+            var vmin int = 0
             if .type == "stacked" {
                 for d in .data {
                     var cum int = 0
@@ -87,6 +90,9 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                     if cum > vmax {
                         vmax = cum
                     }
+                    if cum < vmin {
+                        vmin = cum
+                    }
                 }
             } else {
                 for d in .data {
@@ -95,39 +101,112 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                         if v > vmax {
                             vmax = v
                         }
+                        if v < vmin {
+                            vmin = v
+                        }
                     }
                 }
             }
-            // ---- nice step:int 域 1-2-5 阶梯(退化域 4/1) ----
-            var step int = 1
-            if vmax > 4 {
-                var guard = 0
-                while step * 4 < vmax && guard < 12 {
-                    var mm = step
-                    while mm >= 10 {
-                        mm = mm / 10
+            var span int = vmax - vmin
+            if span <= 0 {
+                vmin = 0
+                vmax = 100
+                span = 100
+            }
+            // ---- 刻度阶梯 {1,2,5}·10^k(与 chart_project.at 渲染器同式) ----
+            var raw int = span / 4
+            if raw < 1 {
+                raw = 1
+            }
+            var step int = 0
+            var base int = 1
+            var guard int = 0
+            while step == 0 {
+                if base >= raw {
+                    step = base
+                }
+                if step == 0 {
+                    if base * 2 >= raw {
+                        step = base * 2
                     }
-                    if mm == 2 {
-                        step = step * 5 / 2
-                    } else {
-                        step = step * 2
+                }
+                if step == 0 {
+                    if base * 5 >= raw {
+                        step = base * 5
                     }
-                    guard = guard + 1
+                }
+                base = base * 10
+                guard = guard + 1
+                if guard > 12 {
+                    step = base
                 }
             }
-            var domain int = step * 4
-            if domain < vmax {
-                domain = step * 5
+            // ---- 可见刻度(≤5 槽,自底向上填) ----
+            var m int = vmin / step
+            if vmin - m * step != 0 {
+                if vmin > 0 {
+                    m = m + 1
+                }
             }
-            var domainf float = domain
-            .yTick4 = f"${step * 4}"
-            .yTick3 = f"${step * 3}"
-            .yTick2 = f"${step * 2}"
-            .yTick1 = f"${step}"
-            .yTick0 = "0"
-
+            var tickLo int = m * step
+            var count int = (vmax - tickLo) / step + 1
+            if count > 5 {
+                count = 5
+            }
+            var btk int = tickLo + (count - 1) * step
+            var vminf float = vmin
+            var spanf float = span
             var bottom float = 260.0
-            var span float = 240.0
+            var spanpx float = 240.0
+            // 基线 y(0)(vmin≥0 时贴底,vmax≤0 时贴顶)
+            var zf float = 0.0
+            var y0 float = bottom - (zf - vminf) / spanf * spanpx
+            .baselineY = f"${y0}"
+            // 逐刻度 y 与网格路径(自顶 = 最高刻度 btk 向下;int 求值后
+            // 显式存储强转 float——几何纪律)
+            var gf float = btk
+            var gy4 float = bottom - (gf - vminf) / spanf * spanpx
+            var gv3 int = btk - step
+            var gv3f float = gv3
+            var gy3 float = bottom - (gv3f - vminf) / spanf * spanpx
+            var gv2 int = btk - step * 2
+            var gv2f float = gv2
+            var gy2 float = bottom - (gv2f - vminf) / spanf * spanpx
+            var gv1 int = btk - step * 3
+            var gv1f float = gv1
+            var gy1 float = bottom - (gv1f - vminf) / spanf * spanpx
+            var gv0 int = btk - step * 4
+            var gv0f float = gv0
+            var gy0 float = bottom - (gv0f - vminf) / spanf * spanpx
+            .yTick4 = f"${btk}"
+            var gp str = f"M40 ${gy4} H550"
+            if count >= 2 {
+                .yTick3 = f"${gv3}"
+                gp = gp + f" M40 ${gy3} H550"
+            } else {
+                .yTick3 = ""
+            }
+            if count >= 3 {
+                .yTick2 = f"${gv2}"
+                gp = gp + f" M40 ${gy2} H550"
+            } else {
+                .yTick2 = ""
+            }
+            if count >= 4 {
+                .yTick1 = f"${gv1}"
+                gp = gp + f" M40 ${gy1} H550"
+            } else {
+                .yTick1 = ""
+            }
+            if count >= 5 {
+                .yTick0 = f"${gv0}"
+                gp = gp + f" M40 ${gy0} H550"
+            } else {
+                .yTick0 = ""
+            }
+            .gridPath = gp
+            var domainf float = span
+
             var n int = .data.len()
             var nf float = n
             var slot float = 510.0 / nf
@@ -152,7 +231,8 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                     var xf float = 40.0 + i * slot + slot * 0.2
                     var rstr = ""
                     if .type == "stacked" {
-                        // 前缀和底边:前面系列累计抬升
+                        // 前缀和底边:前面系列累计抬升;段跨越基线按符号取
+                        // 顶/高(v≥0 段在基线上方,反之向下)
                         var before int = 0
                         var k2 = 0
                         for f2 in .fields {
@@ -165,16 +245,26 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                         var vf float = d[f]
                         var beforef float = before
                         var allf float = vf + beforef
-                        var ytopS float = bottom - allf / domainf * span
-                        var ybase float = bottom - beforef / domainf * span
-                        var hfS float = ybase - ytopS
-                        rstr = f"M${xf} ${ytopS} h${inner} v${hfS} h-${inner} Z"
+                        var ysegtop float = bottom - (allf - vminf) / domainf * spanpx
+                        var ybaseS float = bottom - (beforef - vminf) / domainf * spanpx
+                        var rtopS float = ysegtop
+                        var rhS float = ybaseS - ysegtop
+                        if vf < 0.0 {
+                            rtopS = ybaseS
+                            rhS = ysegtop - ybaseS
+                        }
+                        rstr = f"M${xf} ${rtopS} h${inner} v${rhS} h-${inner} Z"
                     } else {
                         var vfg float = d[f]
-                        var ytop float = bottom - vfg / domainf * span
-                        var hf float = bottom - ytop
+                        var ytop float = bottom - (vfg - vminf) / domainf * spanpx
+                        var rtop float = ytop
+                        var rh float = y0 - ytop
+                        if vfg < 0.0 {
+                            rtop = y0
+                            rh = ytop - y0
+                        }
                         var xfg float = xf + k * barw
-                        rstr = f"M${xfg} ${ytop} h${barw} v${hf} h-${barw} Z"
+                        rstr = f"M${xfg} ${rtop} h${barw} v${rh} h-${barw} Z"
                     }
                     var ci int = k
                     if ci >= ccount {
@@ -200,7 +290,7 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                     cik = ccount - 1
                 }
                 var color = cs[cik]
-                var name = f
+                var name = .fields[k]
                 var lname = .labels
                 if lname.len() > k {
                     name = lname[k]
@@ -340,7 +430,7 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                 var body = ""
                 var k3 = 0
                 for f5 in .fields {
-                    var name2 = f5
+                    var name2 = .fields[k3]
                     var lname2 = .labels
                     if lname2.len() > k3 {
                         name2 = lname2[k3]
@@ -456,7 +546,7 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                                 path (d: .gridPath, stroke: "#e2e8f0", stroke-width: "1") {}
                             }
                             line (x1: "40", y1: "20", x2: "40", y2: "260", stroke: "#94a3b8", stroke-width: "1") {}
-                            line (x1: "40", y1: "260", x2: "550", y2: "260", stroke: "#94a3b8", stroke-width: "1") {}
+                            line (x1: "40", y1: .baselineY, x2: "550", y2: .baselineY, stroke: "#94a3b8", stroke-width: "1") {}
                             if .legendText0 != "" {
                               if .visBr0 {
                                 for seg in .segs0 {
