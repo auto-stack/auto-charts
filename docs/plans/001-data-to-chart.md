@@ -1,6 +1,6 @@
 ---
 plan_id: CHARTS-001
-status: drafting
+status: execution_done
 feature_name: data-to-chart
 author: [Codex]
 created_at: 2026-10-29
