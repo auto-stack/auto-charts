@@ -6,7 +6,7 @@ author: [Codex]
 created_at: 2026-10-29
 updated_at: 2026-10-29
 plan_revision: 2
-current_step: 0
+current_step: 1
 total_steps: 7
 supersedes_spec_components: []
 new_spec_components: [docs/specs/charts/basic-capabilities.md]
@@ -42,6 +42,8 @@ Auto / AutoUI、当前匹配的AutoLang/AutoUI/AutoMan工具组合、各app已�
 ## 4. 需求分析与背景调查
 
 授权：用户于2026-10-29要求建立总跟踪表、复用Notes/Reader/Blog现有计划，并为其余B类应用准备基本能力补齐计划。此处授权的是**计划准备和必要的文档/组合版本登记**，不宣称已授权/完成本计划具体功能实现，不推定全量竞品复刻或Linux开发已启动。
+
+交付授权（2026-10-29）：用户以 `/goal 完成计划001` + `/auto-plan-goal PLAN-001` 授予全链条执行授权：work（含本检出内实现/构建/测试）、review、限额内修复、merge（canonical Spec/ledger/归档/清理/落地检查）。后续阶段继承此授权，不再重复询问。
 
 2026-10-29用户明确改用 `D:/autostack/<产品仓名>` 独立clone开发，先push应用再更新子模块pin；此修订仅更新工作位置、跨仓链接和交付状态描述，功能目标、T-01..07依赖、work验收与Spec增量不变，不重置任务。旧开发位置被此用户决定替代。
 
@@ -103,7 +105,7 @@ T-02..04按下列任务依赖顺序推进；T-05将本节拟议测试做成真�
 
 ## 8. 执行步骤
 
-- [ ] T-01（owner_stage=work；依赖 无；AC-01..04）：基线与全路径探针：验证文件选择或显式路径读取、健全CSV解析、版本化工程存储、当前柱图组件的值域/负值/零值处理和SVG真实输出；冻结数据/资源预算。不能用 split(逗号) 代替约定CSV输入，也不以截图充当图表导出。若需后端，17851 为候选。 输出新文件 `docs/plans/evidence/001/capability-decision.md`，记录可用API、版本/资源边界、缺项owner和最小闭环。
+- [x] T-01（owner_stage=work；依赖 无；AC-01..04）：基线与全路径探针：验证文件选择或显式路径读取、健全CSV解析、版本化工程存储、当前柱图组件的值域/负值/零值处理和SVG真实输出；冻结数据/资源预算。不能用 split(逗号) 代替约定CSV输入，也不以截图充当图表导出。若需后端，17851 为候选。 输出新文件 `docs/plans/evidence/001/capability-decision.md`，记录可用API、版本/资源边界、缺项owner和最小闭环。[✅ 已完成]（2026-10-29：决策文档已落盘；auto CLI=v0.0.20-117；VM轨 run+MCP 实测通过（port 19511 state/snapshot）；vue轨需 AUTO_BACKEND_IMPL=vm + back_port:17851（pac.at 已加）；vue build 25 TS 错=生成器推断缺陷 G-2（donut 形态规避）；负值柱图越界 G-4→T-03 扩符号域；预算冻结：10MiB/万行/64列/1..4数值列/拒绝式）
 - [ ] T-02（owner_stage=work；依赖 T-01；AC-01..04）：输入与项目数据：新增 CSV/图表项目模块及接口（拟议 src/back/csv.at / chart_project.at / api.at）；数据与列映射校验，保存可恢复的工程。
 - [ ] T-03（owner_stage=work；依赖 T-02；AC-01..04）：图表与输出：复用 components/bar_chart.at，确认从真实数据映射到几何；保存规格并导出独立 SVG，类别/中文/XML特殊字符正确。
 - [ ] T-04（owner_stage=work；依赖 T-03；AC-01..04）：界面去演示化：增加导入、列映射、保存重开/导出和错误状态；样例仅显式入口，普通启动空态；用户数据模式不再由模拟Tick覆盖。

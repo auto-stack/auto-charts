@@ -12,6 +12,7 @@ render: "vue"
 title: "Charts"
 title_zh: "图表"
 front_port: 17850
+back_port: 17851
 desktop: "true"
 
 dep stylekit {
