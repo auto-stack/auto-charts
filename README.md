@@ -2,18 +2,20 @@
 
 图表工坊，使用 AutoLang / AutoUI 开发的独立应用。
 
-本仓是首批产品源码基线；当前能力以导入版本为准，仓库描述中的产品方向不表示全部已实现。
+更新：2026-10-31。CHARTS-001已交付真实CSV、映射、工程保存重开和独立SVG；柱图是冻结的基本合同。中文传输和小数几何边界见下方002，当前尚未闭合。
 
 ## 运行
 
 安装对应版本的 `auto` CLI 后，从本仓根执行：
 
-```sh
+```powershell
 # vue 前端 + AutoVM HTTP 后端（缺省后端是 a2r rust 轨，本仓不用）
-AUTO_BACKEND_IMPL=vm auto run
+$env:AUTO_BACKEND_IMPL = 'vm'
+auto run
 
 # VM 窗口 + VM HTTP 后端（merged 模式无 HTTP 服务器，本仓后端能力需 split）
-AUTO_VM_WITH_HTTP=1 auto run -r vm
+$env:AUTO_VM_WITH_HTTP = '1'
+auto run -r vm
 ```
 
 前端端口：`17850`；后端端口：`17851`（`pac.at` `back_port`，可 `-F/-B` 覆盖）。
@@ -39,7 +41,7 @@ python tests/basic/verify_basic.py --profile vue   # vue + Playwright
 
 来源提交、路径与文件 hash 见 `SOURCE-IMPORT.json`。首次导入提交保留在 `source-sync` 分支；完整 v0.5 恢复后从该基线导入差异，再与产品开发线合并。
 
-AutoOS 通过 [`apps/024-charts`](https://github.com/auto-stack/auto-os/tree/v0.6-dev/apps/024-charts) submodule 固定本仓版本；教学 Demo 保留在来源仓。
+AutoOS 通过 [`apps/auto-charts`](https://github.com/auto-stack/auto-os/tree/main/apps/auto-charts) submodule 固定本仓版本；教学 Demo 保留在来源仓。
 
 已有测试随源导入；端口与平台相关测试需要按本仓配置准备运行环境。安装/启动与双端完整功能验收是不同检查项。
 
@@ -49,3 +51,12 @@ AutoOS 通过 [`apps/024-charts`](https://github.com/auto-stack/auto-os/tree/v0.
 总状态与前置见 [AutoOS B类总跟踪表](https://github.com/auto-stack/auto-os/blob/main/docs/plans/b-apps-basic-capabilities.md)。基础能力通过后再考虑Linux；A类统一等待 auto-os-distro 完成 Nix＋COSMIC 基础，后续增强另会话。
 
 开发使用独立 clone `D:/autostack/auto-charts` 的 main；AutoOS 内对应子模块仅固定已交付提交，流程见 [App开发与子模块](https://github.com/auto-stack/auto-os/blob/main/docs/design/strategy/app-submodule-workflow.md)。
+
+
+## 当前后续：独立运行、中文与小数
+
+[CHARTS-002：中文数据传输、小数图形与独立运行收口](docs/plans/002-standalone-unicode-and-decimal-charts.md) 为 drafting/r1、0/8，**尚未实施**。优先复用现有Http/JSON/查询绑定和柱图能力，T-00先核验当前SDK与实际owner，不重建CSV或HTTP栈。
+
+当前已登记边界：Vue中文路径/工程名经query解码可能乱码；屏幕整数值域与导出百位截断会让小数结果不一致。002要求真实中文/特殊字符往返、合法小数的域/基线/刻度与独立几何oracle，以及正式独立启动和旧工程失败保全；旧001结果不覆盖这些新增门。
+
+[路线图](docs/roadmap-v0.6.md) · [现实现规范](docs/specs/charts/basic-capabilities.md)。本轮只规划并push，不实现、不更新AutoOS子模块。应用单独运行验证后再由OS统一计划集成；Linux继续等待Nix＋COSMIC基础。
