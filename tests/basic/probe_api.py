@@ -192,14 +192,35 @@ def main():
         ssvg = f.read()
     check("&amp;" in ssvg and "&lt;" in ssvg, "xml escape", ssvg)
     check(ssvg.count("<rect") == 8, "six bars + two legend swatches", ssvg.count("<rect"))
-    # 独立几何 oracle（同式复算）：vmin=-20,vmax=15,span=35；
-    # y(v)=260-(v+20)/35*240；neg 行 v2=-20 → rect 应锚在基线 y0≈122.857 且向下延伸
+    # 独立几何 oracle（同式复算，容差断言——CHARTS-002 T-04：字面串随
+    # 运行时 float 输出精度漂移，改坐标解析对账）：vmin=-20,vmax=15,
+    # span=35；y(v)=260-(v+20)/35*240；基线 y0=122.857…
     y0 = 260 - (0 + 20) / 35 * 240
-    check('y="122.85713"' in ssvg, "negative bars anchored at computed baseline", ssvg)
     check(abs(y0 - 122.85714285714286) < 1e-6, "oracle sanity", y0)
-    check('height="137.14287"' in ssvg, "negative bar height (20/35*240)", ssvg)
-    check('height="102.85713"' in ssvg, "positive bar height (15/35*240)", ssvg)
-    check('height="0"' in ssvg, "zero bar renders zero height", ssvg)
+    import re as _re
+    def bars_of(color):
+        rs = _re.findall(r'<rect x="([\d.e+-]+)" y="([\d.e+-]+)" width="([\d.e+-]+)" height="([\d.e+-]+)" fill="%s"' % color, ssvg)
+        return [r for r in rs if not (r[1] == "6" and r[3] == "10")]
+    NEG_Y = y0                       # 负值柱顶=基线，向下延伸
+    cases = [("#2563eb", [10.0, 0.0, -5.0]), ("#16a34a", [-20.0, 0.0, 15.0])]
+    ok_anchor = ok_h = ok_zero = True
+    for color, vv in cases:
+        rs = bars_of(color)
+        if len(rs) != 3:
+            ok_anchor = False
+            continue
+        for (_x, ry, _w, rh), v in zip(rs, vv):
+            exp_y = (260 - (v + 20) / 35 * 240) if v >= 0 else y0
+            exp_h = (y0 - (260 - (v + 20) / 35 * 240)) if v >= 0 else ((260 - (v + 20) / 35 * 240) - y0)
+            if abs(float(ry) - exp_y) > 0.01:
+                ok_anchor = False
+            if abs(float(rh) - exp_h) > 0.01:
+                ok_h = False
+            if v == 0 and float(rh) != 0.0:
+                ok_zero = False
+    check(ok_anchor, "negative bars anchored at computed baseline", ssvg[:200])
+    check(ok_h, "bar heights match oracle (±0.01px)", cases)
+    check(ok_zero, "zero bar renders zero height", ssvg)
 
     print("-" * 50)
     total_fail = len(FAILS)

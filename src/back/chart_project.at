@@ -7,10 +7,11 @@
 // 盘现读、改完即写；公开面全部标量与 JSON 字符串；json.parse 数组用
 // for-in 遍历（len()/索引在册缺陷 F-8），列定位靠计数器；写侧手工转义；
 // 无 rename/remove 原语 → 备份+暂存读回校验+提交+失败还原（非断电级
-// 原子，如实声明）。数值定点百位（×100）整数运算（i32 上限内），SVG
-// 坐标换算经 float 存储强转（int→float 存储强转纪律）+ float.to_string
-// 输出（auto-calc 先例）；字符判定用等值链（str 无跨字符序比较——reader
-// jsonx 先例）。阶梯刻度 = {1,2,5}·10^k（Spec delta 记录，oracle 同式）。
+// 原子，如实声明）。数值解释 float 双端统一（CHARTS-002 T-02；语法
+// [+-]?digits[.digits]，|v| ≤ 1e7，f64 精度策略见 standalone-decision
+// §3），SVG 坐标 float.to_string 输出（≈8 位有效数字）；字符判定用
+// 等值链（str 无跨字符序比较——reader jsonx 先例）。阶梯刻度 =
+// {1,2,5}·10^k（Spec delta 记录，oracle 同式）。
 //
 // 数据目录：AUTO_CHARTS_DATA → USERPROFILE|HOME/.auto-charts →
 // ./.auto-charts-data；projects/<slug>.json、exports/<name>.svg。
@@ -158,7 +159,7 @@ fn write_with_backup(path str, payload str) int {
 }
 
 // ═══════════════════════════════════════════════════════════
-// 字符与定点十进制（×100）
+// 字符与数值（CHARTS-002 T-02：float 双端统一，替代定点百位）
 // ═══════════════════════════════════════════════════════════
 
 fn digit_val(c str) int {
@@ -195,13 +196,13 @@ fn digit_val(c str) int {
     return -1
 }
 
-const DEC_ERR_SYNTAX = -2000000000
-const DEC_ERR_RANGE = -1999999999
-const VALUE_LIMIT_H = 1000000000
+const DEC_ERR_SYNTAX = -2000000000.0
+const DEC_ERR_RANGE = -1999999999.0
 
-/// 语法：trim 后 [+-]?digits[.digits]（无指数/内部空格）；小数截断到
-/// 2 位；|值| ≤ 10,000,000（百位 ≤ 1e9，i32 安全）。违例返回哨兵。
-pub fn parse_dec_hundredths(s str) int {
+/// 语法：trim 后 [+-]?digits[.digits]（无指数/内部空格，整数部分必需）；
+/// |值| ≤ 10,000,000。小数按 float（f64）解释：逐位累积至 15 位，其后
+/// 差异低于表示精度（决策稿 §3，不承诺任意精度）。违例返回哨兵。
+pub fn parse_value(s str) float {
     var t str = s.trim()
     var n int = t.len()
     if n == 0 {
@@ -220,147 +221,224 @@ pub fn parse_dec_hundredths(s str) int {
     }
     var int_part int = 0
     var digits int = 0
+    var seen_dot bool = false
+    var frac float = 0.0
+    var frac_scale float = 1.0
+    var frac_digits int = 0
     while i < n {
         var c str = t.substr(i, 1)
         var dv int = digit_val(c)
         if dv < 0 {
             if c == "." {
+                if seen_dot {
+                    return DEC_ERR_SYNTAX
+                }
+                seen_dot = true
                 i = i + 1
-                break
+                continue
             }
             return DEC_ERR_SYNTAX
         }
-        int_part = int_part * 10 + dv
-        digits = digits + 1
-        if digits > 9 {
-            return DEC_ERR_RANGE
-        }
-        i = i + 1
-    }
-    var frac_h int = 0
-    var frac_digits int = 0
-    while i < n {
-        var c2 str = t.substr(i, 1)
-        var dv2 int = digit_val(c2)
-        if dv2 < 0 {
-            return DEC_ERR_SYNTAX
-        }
-        if frac_digits < 2 {
-            frac_h = frac_h * 10 + dv2
-            frac_digits = frac_digits + 1
+        if seen_dot {
+            if frac_digits < 15 {
+                frac_scale = frac_scale * 10.0
+                var dvf float = dv
+                frac = frac + dvf / frac_scale
+                frac_digits = frac_digits + 1
+            }
+        } else {
+            int_part = int_part * 10 + dv
+            digits = digits + 1
+            if digits > 9 {
+                return DEC_ERR_RANGE
+            }
         }
         i = i + 1
     }
     if digits == 0 {
         return DEC_ERR_SYNTAX
     }
-    while frac_digits < 2 {
-        frac_h = frac_h * 10
-        frac_digits = frac_digits + 1
-    }
-    var h int = int_part * 100 + frac_h
+    var ipf float = int_part
+    var v float = ipf + frac
     if neg {
-        h = 0 - h
+        v = 0.0 - v
     }
-    if h >= VALUE_LIMIT_H {
+    if v >= 10000000.0 {
         return DEC_ERR_RANGE
     }
-    if h <= 0 - VALUE_LIMIT_H {
+    if v <= 0.0 - 10000000.0 {
         return DEC_ERR_RANGE
     }
-    return h
+    return v
 }
 
-/// 百位定点 → 显示串（去尾零；整数无小数点）。刻度标签专用。
-pub fn format_hundredths(h int) str {
-    var sign str = ""
-    var mag int = h
-    if mag < 0 {
-        sign = "-"
-        mag = 0 - mag
+/// float → 刻度标签串（0 归一为 "0"）。
+pub fn format_value(v float) str {
+    if v == 0.0 {
+        return "0"
     }
-    var ip int = mag / 100
-    var fp int = mag - ip * 100
-    if fp == 0 {
-        return sign + ip.to_string()
+    return v.to_string()
+}
+
+/// CHARTS-002 T-02：刻度标签 = k·m·10^e 的整数重建（与组件
+/// chart_geom.label_of_k 同式；VM float 为 f32，浮点路径 %.8g 会输出
+/// "0.00049999997" 类噪声，整数重构与 float 宽度无关，oracle 同式对账）。
+pub fn label_of_k(k int, m int, e int) str {
+    if k == 0 {
+        return "0"
     }
-    var f2 str = fp.to_string()
-    if fp < 10 {
-        f2 = "0" + f2
-        if f2.substr(1, 1) == "0" {
-            f2 = f2.substr(0, 1)
+    var neg bool = false
+    var kk int = k
+    if kk < 0 {
+        neg = true
+        kk = 0 - kk
+    }
+    var mant int = kk * m
+    var digits str = mant.to_string()
+    var out str = ""
+    if e >= 0 {
+        out = digits
+        var z int = 0
+        while z < e {
+            out = out + "0"
+            z = z + 1
         }
     } else {
-        if f2.substr(1, 1) == "0" {
-            f2 = f2.substr(0, 1)
+        var ne int = 0 - e
+        var dl int = digits.len()
+        var padded str = digits
+        while dl <= ne {
+            padded = "0" + padded
+            dl = dl + 1
+        }
+        var ip int = dl - ne
+        var head str = padded.substr(0, ip)
+        var tail str = padded.substr(ip, dl - ip)
+        while tail.len() > 0 {
+            var lc str = tail.substr(tail.len() - 1, 1)
+            if lc == "0" {
+                tail = tail.substr(0, tail.len() - 1)
+            } else {
+                break
+            }
+        }
+        if tail == "" {
+            out = head
+        } else {
+            out = head + "." + tail
         }
     }
-    return sign + ip.to_string() + "." + f2
+    if neg {
+        out = "-" + out
+    }
+    return out
+}
+
+/// CHARTS-002 T-02：由 step 反查阶梯档位 e（m∈{1,2,5}·10^e），相对容差
+/// 1e-5（step 携带 f32 噪声）。未命中（不应发生）回退 0。
+fn step_e_of(step float) int {
+    var ee int = 0 - 12
+    while ee <= 12 {
+        var p10 float = 1.0
+        var zi int = 0
+        if ee >= 0 {
+            while zi < ee {
+                p10 = p10 * 10.0
+                zi = zi + 1
+            }
+        } else {
+            var ne2 int = 0 - ee
+            while zi < ne2 {
+                p10 = p10 / 10.0
+                zi = zi + 1
+            }
+        }
+        if step_me_match(step, 1, p10) {
+            return ee
+        }
+        if step_me_match(step, 2, p10) {
+            return ee
+        }
+        if step_me_match(step, 5, p10) {
+            return ee
+        }
+        ee = ee + 1
+    }
+    return 0
+}
+
+/// 由 step 反查档位尾数 m∈{1,2,5}。未命中回退 1。
+fn step_m_of(step float) int {
+    var ee int = 0 - 12
+    while ee <= 12 {
+        var p10 float = 1.0
+        var zi int = 0
+        if ee >= 0 {
+            while zi < ee {
+                p10 = p10 * 10.0
+                zi = zi + 1
+            }
+        } else {
+            var ne3 int = 0 - ee
+            while zi < ne3 {
+                p10 = p10 / 10.0
+                zi = zi + 1
+            }
+        }
+        if step_me_match(step, 1, p10) {
+            return 1
+        }
+        if step_me_match(step, 2, p10) {
+            return 2
+        }
+        if step_me_match(step, 5, p10) {
+            return 5
+        }
+        ee = ee + 1
+    }
+    return 1
+}
+
+fn step_me_match(step float, m int, p10 float) bool {
+    var mf float = m
+    var cand float = mf * p10
+    var diff float = cand - step
+    if diff < 0.0 {
+        diff = 0.0 - diff
+    }
+    var tol float = step * 0.00001
+    if tol < 0.0 {
+        tol = 0.0 - tol
+    }
+    if diff <= tol {
+        return true
+    }
+    return false
 }
 
 // ═══════════════════════════════════════════════════════════
 // 工程 slug
 // ═══════════════════════════════════════════════════════════
 
-fn unsafe_name_char(c str) bool {
-    if c == "/" {
-        return true
-    }
-    if c == "\\" {
-        return true
-    }
-    if c == ":" {
-        return true
-    }
-    if c == "*" {
-        return true
-    }
-    if c == "?" {
-        return true
-    }
-    if c == "\"" {
-        return true
-    }
-    if c == "<" {
-        return true
-    }
-    if c == ">" {
-        return true
-    }
-    if c == "|" {
-        return true
-    }
-    if c == " " {
-        return true
-    }
-    if c == "%" {
-        return true
-    }
-    if c == "#" {
-        return true
-    }
-    return false
-}
-
 /// 字母/数字/-/_ 保留；Windows 保留字符与空格折叠为 -；其余（中文等）
-/// 保留；收缩连续 -、去首尾 -；≤64 字符；空结果 → "chart"。
+/// 保留；收缩连续 -、去首尾 -；≤192 字节（≈64 个 CJK 字符；CHARTS-002
+/// T-01 修复：原逐字节 substr+拼接会把多字节字符拆成非法 UTF-8 片段，
+/// VM 静默丢弃 → 一切 CJK 名坍缩为 "chart" 互相冲突；改为整体 replace
+/// 折叠，不切字符串）；空结果 → "chart"。长度按 UTF-8 字节语义。
 pub fn slug_of(name str) str {
-    var out str = ""
-    var n int = name.len()
-    var i int = 0
-    while i < n {
-        var c str = name.substr(i, 1)
-        var keep bool = true
-        if unsafe_name_char(c) {
-            keep = false
-        }
-        if keep {
-            out = out + c
-        } else {
-            out = out + "-"
-        }
-        i = i + 1
-    }
+    var out str = name
+    out = out.replace("/", "-")
+    out = out.replace("\\", "-")
+    out = out.replace(":", "-")
+    out = out.replace("*", "-")
+    out = out.replace("?", "-")
+    out = out.replace("\"", "-")
+    out = out.replace("<", "-")
+    out = out.replace(">", "-")
+    out = out.replace("|", "-")
+    out = out.replace(" ", "-")
+    out = out.replace("%", "-")
+    out = out.replace("#", "-")
     while out.find("--") >= 0 {
         out = out.replace("--", "-")
     }
@@ -375,8 +453,8 @@ pub fn slug_of(name str) str {
             out = out.substr(0, out.len() - 1)
         }
     }
-    if out.len() > 64 {
-        out = out.substr(0, 64)
+    if out.len() > 192 {
+        out = out.substr(0, 192)
     }
     if out.len() == 0 {
         out = "chart"
@@ -468,7 +546,7 @@ pub fn validate_rows(rows_frag str, col_count int, index_col int, v0 int, v1 int
         var ci int = 0
         for cell in row {
             if col_in_slots(ci, v0, v1, v2, v3) {
-                var h int = parse_dec_hundredths(cell)
+                var h float = parse_value(cell)
                 if h == DEC_ERR_SYNTAX {
                     return err_json("err_cell", row_no, ci, "cell is not a valid number: " + cell)
                 }
@@ -508,13 +586,10 @@ pub fn svg_escape(s str) str {
     return out
 }
 
-/// 百位定点 h → SVG y 坐标（float 域；绘图区 y 20..260，240px 高）。
-fn y_of_h(h int, vmin_h int, span_h int) float {
-    var hf float = h
-    var vminf float = vmin_h
-    var spanf float = span_h
-    var diff float = hf - vminf
-    var frac float = diff / spanf
+/// 值 v → SVG y 坐标（float 域；绘图区 y 20..260，240px 高）。
+fn y_of_h(v float, vmin float, span float) float {
+    var diff float = v - vmin
+    var frac float = diff / span
     var y float = 260.0 - frac * 240.0
     return y
 }
@@ -558,27 +633,27 @@ pub fn render_bar_svg(headers_frag str, rows_frag str, index_col int, c0 int, c1
         }
         hi = hi + 1
     }
-    // ---- Pass 1：行数 + 值域（含 0）----
+    // ---- Pass 1：行数 + 值域（含 0；float 域）----
     var n int = 0
-    var vmin_h int = 0
-    var vmax_h int = 0
+    var vmin float = 0.0
+    var vmax float = 0.0
     for row in rows {
         n = n + 1
         var ci int = 0
         for cell in row {
             if col_in_slots(ci, c0, c1, c2, c3) {
-                var h int = parse_dec_hundredths(cell)
+                var h float = parse_value(cell)
                 if h == DEC_ERR_SYNTAX {
                     return ""
                 }
                 if h == DEC_ERR_RANGE {
                     return ""
                 }
-                if h < vmin_h {
-                    vmin_h = h
+                if h < vmin {
+                    vmin = h
                 }
-                if h > vmax_h {
-                    vmax_h = h
+                if h > vmax {
+                    vmax = h
                 }
             }
             ci = ci + 1
@@ -587,38 +662,82 @@ pub fn render_bar_svg(headers_frag str, rows_frag str, index_col int, c0 int, c1
     if n == 0 {
         return ""
     }
-    var span_h int = vmax_h - vmin_h
-    if span_h <= 0 {
-        vmin_h = 0
-        vmax_h = 100
-        span_h = 100
+    var span float = vmax - vmin
+    if span <= 0.0 {
+        vmin = 0.0
+        vmax = 100.0
+        span = 100.0
     }
-    // ---- 阶梯步长 {1,2,5}·10^k，百位定点整数 ----
-    var raw int = span_h / 4
-    if raw < 1 {
-        raw = 1
-    }
-    var step_h int = 0
-    var base int = 1
+    // ---- 阶梯步长 {1,2,5}·10^k（float；k 可为负——span/4 < 1 时下探
+    //      种子，0.1/0.01/… 档位参与候选，与 Spec 公式一致）----
+    var raw float = span / 4.0
+    // 边界容差：除法种子下探会带 ulp 偏差（0.002/4 边界 step=5e-4 实测
+    // 跌档为 1e-3），以 1e-7 相对容差吸收；相邻档差 ≥1.6×，不会误选。
+    var rawm float = raw - raw / 10000000.0
+    var step float = 0.0
+    var base float = 1.0
     var guard int = 0
-    while step_h == 0 {
-        if base >= raw {
-            step_h = base
-        }
-        if step_h == 0 {
-            if base * 2 >= raw {
-                step_h = base * 2
-            }
-        }
-        if step_h == 0 {
-            if base * 5 >= raw {
-                step_h = base * 5
-            }
-        }
-        base = base * 10
+    while base > rawm {
+        base = base / 10.0
         guard = guard + 1
         if guard > 12 {
-            step_h = base
+            break
+        }
+    }
+    while step == 0.0 {
+        if base >= rawm {
+            step = base
+        }
+        if step == 0.0 {
+            if base * 2.0 >= rawm {
+                step = base * 2.0
+            }
+        }
+        if step == 0.0 {
+            if base * 5.0 >= rawm {
+                step = base * 5.0
+            }
+        }
+        base = base * 10.0
+        guard = guard + 1
+        if guard > 28 {
+            step = base
+        }
+    }
+    // ---- 刻度收集：自 0 向外，档位号 k（tick = k·step 于渲染时乘法
+    //      求值；标签 = label_of_k(k,m,e) 整数重构）；导出全量 ----
+    var lm int = step_m_of(step)
+    var le int = step_e_of(step)
+    var ticks List<int> = []
+    var tk int = 0
+    var kff float = 0.0
+    var tu float = 0.0
+    var gup int = 0
+    while tu <= vmax {
+        if tu >= vmin {
+            ticks.push(tk)
+        }
+        tk = tk + 1
+        kff = kff + 1.0
+        tu = kff * step
+        gup = gup + 1
+        if gup > 64 {
+            break
+        }
+    }
+    tk = 0 - 1
+    kff = 0.0 - 1.0
+    var td float = kff * step
+    while td >= vmin {
+        if td <= vmax {
+            ticks.push(tk)
+        }
+        tk = tk - 1
+        kff = kff - 1.0
+        td = kff * step
+        gup = gup + 1
+        if gup > 128 {
+            break
         }
     }
     // ---- 系列槽压缩（在场槽位紧凑编号）----
@@ -659,31 +778,25 @@ pub fn render_bar_svg(headers_frag str, rows_frag str, index_col int, c0 int, c1
     // ---- SVG 装配 ----
     var s str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
     s = s + "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 560 300\" width=\"560\" height=\"300\" font-family=\"sans-serif\">\n"
-    // 刻度与网格
-    var m int = vmin_h / step_h
-    if vmin_h - m * step_h != 0 {
-        if vmin_h > 0 {
-            m = m + 1
-        }
-    }
-    var tick int = m * step_h
+    // 刻度与网格（导出全量刻度；tick = k·step，标签整数重构）
     var guard2 int = 0
-    while tick <= vmax_h {
-        var yt float = y_of_h(tick, vmin_h, span_h)
+    for tickk in ticks {
+        var kff2 float = tickk
+        var tv float = kff2 * step
+        var yt float = y_of_h(tv, vmin, span)
         var yts str = yt.to_string()
-        var lbl str = format_hundredths(tick)
+        var lbl str = label_of_k(tickk, lm, le)
         s = s + "<line x1=\"40\" y1=\"" + yts + "\" x2=\"550\" y2=\"" + yts + "\" stroke=\"#e2e8f0\" stroke-width=\"1\"/>\n"
         s = s + "<text x=\"34\" y=\"" + (yt + 3.5).to_string() + "\" text-anchor=\"end\" font-size=\"10\" fill=\"#64748b\">" + lbl + "</text>\n"
-        tick = tick + step_h
         guard2 = guard2 + 1
-        if guard2 > 24 {
+        if guard2 > 64 {
             break
         }
     }
     // 轴
-    var ytop_axis float = y_of_h(vmax_h, vmin_h, span_h)
-    var ybase_axis float = y_of_h(vmin_h, vmin_h, span_h)
-    var y0 float = y_of_h(0, vmin_h, span_h)
+    var ytop_axis float = y_of_h(vmax, vmin, span)
+    var ybase_axis float = y_of_h(vmin, vmin, span)
+    var y0 float = y_of_h(0.0, vmin, span)
     var y0s str = y0.to_string()
     s = s + "<line x1=\"40\" y1=\"" + ytop_axis.to_string() + "\" x2=\"40\" y2=\"" + ybase_axis.to_string() + "\" stroke=\"#94a3b8\" stroke-width=\"1\"/>\n"
     s = s + "<line x1=\"40\" y1=\"" + y0s + "\" x2=\"550\" y2=\"" + y0s + "\" stroke=\"#94a3b8\" stroke-width=\"1\"/>\n"
@@ -721,11 +834,11 @@ pub fn render_bar_svg(headers_frag str, rows_frag str, index_col int, c0 int, c1
                 }
             }
             if k >= 0 {
-                var h3 int = parse_dec_hundredths(cell2)
-                var yv float = y_of_h(h3, vmin_h, span_h)
+                var h3 float = parse_value(cell2)
+                var yv float = y_of_h(h3, vmin, span)
                 var rect_y float = yv
                 var rect_h float = y0 - yv
-                if h3 < 0 {
+                if h3 < 0.0 {
                     rect_y = y0
                     rect_h = yv - y0
                 }
@@ -853,8 +966,8 @@ pub fn save_project(name str, source_path str, index_col int, v0 int, v1 int, v2
     if nm == "" {
         return err_json("err_name", 0, 0, "project name is empty")
     }
-    if nm.len() > 64 {
-        return err_json("err_name", 0, 0, "project name longer than 64 chars")
+    if nm.len() > 192 {
+        return err_json("err_name", 0, 0, "project name longer than 192 bytes (UTF-8)")
     }
     var parts str = read_source_parts(source_path)
     var pt = json.parse(parts)

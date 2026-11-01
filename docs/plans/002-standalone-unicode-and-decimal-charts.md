@@ -6,7 +6,7 @@ author: [Codex]
 created_at: 2026-10-31
 updated_at: 2026-10-31
 plan_revision: 1
-current_step: 1
+current_step: 5
 total_steps: 8
 base_branch: main
 base_commit: a5aa170c564f22a42f7a518a6d02d28650f15d32
@@ -106,11 +106,16 @@ CH-01..06均owner_stage=work，T-04在既有门中使其可执行，拟补测试
 
 - [x] T-00（owner_stage=work；依赖001交付；AC-01/02/03）：完成传输/数值/启动全路径有界探针，冻结精度、预算及最小owner前置，不先重写CSV/HTTP栈。
   [✅ 已完成 2026-11-01] 决策稿 `docs/plans/evidence/002/standalone-decision.md`。实测：服务端 POST JSON body 标量与 whole-body 单 str 形参均逐字 UTF-8（P2a/P3）；GET query `+`→空格、%XX latin-1 乱码、`&` 截断（P1b/c/d）；真 UI 红态两轨 CJK 路径导入均失败（vue=三重破坏；VM 运行时自行百分号编码——001「VM raw OK」已漂移）；`Http.post(url, record)` VM 轨退化句柄串（G-6a 复现）、vue 轨绿；冻结 POST+单 `payload str` whole-body+首字节剥壳设计。float 实测 f64 语义、`.to_string()`≈%.8g、0.001/0.002 可区分、`10000000.001→"10000000"`；拼接陷阱（无 to_string 输出位型）。三形态启动实测可用。001 probe 断言 `y="122.85713"` 已随运行时漂移（现 `122.85714`），T-04 改容差断言。
-- [ ] T-01（owner_stage=work；依赖T-00及真实必要前置；AC-02）：修前端/API传输接缝，先建立CH-02反例再实现、回放，保留v1工程。
-- [ ] T-02（owner_stage=work；依赖T-00；AC-03）：统一屏幕/导出的合法数值解释、域/基线/刻度，建立CH-03独立oracle并排除旧截断反例。
-- [ ] T-03（owner_stage=work；依赖T-00/01/02；AC-01/04）：收口正式独立准备/启动、错误分类、旧工程/失败恢复，不增加OS依赖。
-- [ ] T-04（owner_stage=work；依赖T-03；AC-05）：扩展原有双profile门，跑CH-01..06及必要旧预算/几何回归、反控；准备SD候选。
-- [ ] T-05（owner_stage=work；依赖T-04；AC-01..05）：复核漂移、精度与兼容证据、README/roadmap，提交execution_done。
+- [x] T-01（owner_stage=work；依赖T-00及真实必要前置；AC-02）：修前端/API传输接缝，先建立CH-02反例再实现、回放，保留v1工程。
+  [✅ 已完成 2026-11-01] 反例先行（红态已录决策稿 §2.2）：真 UI 两轨 CJK 路径导入均失败（vue=乱码+`+`→空格+`&`截断；VM 运行时自行百分号编码）。实现：import/validate/save/export/project_get 迁 POST+单 `payload str` whole-body（首字节 `"` vs `{` 剥壳兼容 vue JSON.stringify 外壳），原 GET 端点保留兼容；前端 5 调用站点迁移。附带修复 slug_of CJK 逐字节拼接丢弃缺陷（`a中b→ab`、全 CJK 坍缩 `chart` 互撞）→整体 replace 折叠，名称/slug 预算 ≤192 字节。回放：两轨 `已导入 3 行 × 2 列` + 中文工程名保存/打开 ✓（决策稿 §7）。
+- [x] T-02（owner_stage=work；依赖T-00；AC-03）：统一屏幕/导出的合法数值解释、域/基线/刻度，建立CH-03独立oracle并排除旧截断反例。
+  [✅ 已完成 2026-11-01] 后端 `parse_value`（float，替代定点百位）；阶梯含负指数档+1e-7 相对容差；刻度 = k·step 乘法求值、标签 `label_of_k(k,m,e)` 整数重构（f32 噪声隔离，T-00 修正：VM float=f32）。组件：数据面改吃 `rows_frag` 字符串单元（绕开 VM 轨数字小数通道归零 D1）、`parse_decimal` 自解析、调用位 `key: chartEpoch` 强制重算（D2，框架 PLAN-536/os-016 挂载身份语义）。独立 oracle（Python f64）：导出几何 48/48（0.1/0.2、±0.5、[-300,0,25.5]、0.001/0.002、全零、四系列含负）；CH-05 区分性自检（tiny/sdec 新标签≠旧截断产物）。
+- [x] T-03（owner_stage=work；依赖T-00/01/02；AC-01/04）：收口正式独立准备/启动、错误分类、旧工程/失败恢复，不增加OS依赖。
+  [✅ 已完成 2026-11-01] 三形态启动实测（决策稿 §1/§4）；端口占用→`os error 10048` 非零失败且不碰既有实例；冷准备 `auto build -r vm` 实测 0.4s（CLI 解释运行）；README 固化准备/启动/失败语义。CH-04：旧 v1 工程打开+内嵌导出 ✓；目录占位导出明确失败且既有导出不动、恢复后同一导出成功 ✓（VM 缺省路径制造——MCP 输入焦点仅首 input 可靠，登记 G-9）；vue 显式路径目录失败 ✓。
+- [x] T-04（owner_stage=work；依赖T-03；AC-05）：扩展原有双profile门，跑CH-01..06及必要旧预算/几何回归、反控；准备SD候选。
+  [✅ 已完成 2026-11-01] `verify_basic.py` 扩展：CH-01 启动就绪、CH-02 CJK/`%20` 字面对照/中文工程名保存打开导出、CH-03 屏幕基线/刻度 ±1px+标签逐字（VM 状态读数）与 vue SVG path ±1px、CH-04 旧工程/删源/失败保全/恢复、CH-05 区分性自检、CH-06 全序列。门结果：**VM 43/43、Vue 14/14、probe_api 0 失败（容差化重写 001 漂移断言）**。t02 独立几何 oracle 48/48。原始门日志/JSON 在 plan-artifacts（本地）。SD 候选见 Plan §5（slug/名称 192 字节、f32 策略、全零退化 [0,100] 文字修正待 merge 落 canonical）。
+- [x] T-05（owner_stage=work；依赖T-04；AC-01..05）：复核漂移、精度与兼容证据、README/roadmap，提交execution_done。
+  [✅ 已完成 2026-11-01] 决策稿修订（f32 修正、D1/D2/G-9 框架缺口登记、假说闭合 §7）；README 002 交付状态+三形态启动/失败语义；roadmap 第 2 行更新（work 交付 5/8，待复审/merge）；兼容：原 GET 端点保留、v1 工程格式不变、001 预算不变。工作树提交见 §9。
 - [ ] T-06（owner_stage=review；依赖T-05；AC-06）：同clone独立上下文最终复审，源码相同不替代独立数值/字节对账。
 - [ ] T-07（owner_stage=merge；依赖T-06 pass；AC-07）：仅app规范/归档/提交push收尾，AutoOS版本留未来统一计划。
 

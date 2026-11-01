@@ -1,31 +1,83 @@
-// src/back/api.at — Charts 基础能力 API（CHARTS-001 T-02）
+// src/back/api.at — Charts 基础能力 API（CHARTS-001 T-02；CHARTS-002 T-01）
 //
 // 端点均为薄封装（数据/校验/存储逻辑在 csv.at / chart_project.at）；
 // 返回 JSON 字符串（动态数据面，reader T-01 同款裁定：非 api 模块不构
 // 造 api 端点类型，VM/a2r 缺陷规避）。预算与错误码见
 // docs/plans/evidence/001/capability-decision.md §5。
+//
+// CHARTS-002 T-01 传输迁移：带业务参数的端点（import/validate/save/
+// export/project_get）改为 POST + 单一 `payload str` 整体 body 参数
+// （决策稿 standalone-decision.md §2：VM 轨原样发送 JSON 对象文本、
+// vue 轨外包 JSON 字符串壳，端点内按首字节剥壳；查询参数链路存在
+// `+`→空格、%XX latin-1 乱码、`&` 截断缺陷，owner auto-web，不修复
+// 框架只绕开）。原 GET 端点保留（兼容承诺），前端不再使用。
 
 use chart_project
 use csv
+
+/// POST body 载荷剥壳：trim 后首字节为 `"`（vue JSON.stringify 壳）→
+/// json.parse 取内层字符串；否则原样（VM 轨 JSON 对象文本）。
+fn unwrap_payload(payload str) str {
+    var data str = payload.trim()
+    if data.len() > 1 {
+        if data.substr(0, 1) == "\"" {
+            var inner str = json.parse(data)
+            data = inner.trim()
+        }
+    }
+    return data
+}
+
+fn payload_err(detail str) str {
+    return "{\"ok\":false,\"err_code\":\"err_bad_request\",\"err_row\":0,\"err_col\":0,\"detail\":\"" + csv.json_escape_cell(detail) + "\"}"
+}
+
 
 /// 诊断状态（数据目录、版本）。
 #[api(method = "GET", path = "/api/v1/status")]
 pub fn status() str {
     var dd str = chart_project.data_dir()
-    return "{\"ok\":true,\"app\":\"charts\",\"api\":\"v1b\",\"data_dir\":\"" + csv.json_escape_cell(dd) + "\"}"
+    return "{\"ok\":true,\"app\":\"charts\",\"api\":\"v1c\",\"data_dir\":\"" + csv.json_escape_cell(dd) + "\"}"
 }
 
-/// 导入 CSV：读源文件并解析（结构校验：BOM/引号/换行/行列预算）。
-/// 返回 parse_csv_parts 信封（headers_frag/rows_frag 为转义 JSON 数组串，
-/// 前端二次 json.parse 取数组）。GET+query：双轨 Http body 编码分歧
-/// （vue=对象/VM=字符串，实测记录 capability-decision G-6），标量参数
-/// 全走 query（reader get_chapter 同款）。
+/// 导入 CSV（POST）：读源文件并解析（结构校验：BOM/引号/换行/行列预算）。
+/// body：{"path": "..."}。返回 parse_csv_parts 信封（headers_frag/rows_frag
+/// 为转义 JSON 数组串，前端二次 json.parse 取数组）。
+#[api(method = "POST", path = "/api/v1/import")]
+pub fn import_csv_post(payload str) str {
+    var data str = unwrap_payload(payload)
+    var pt = json.parse(data)
+    var p str = pt.path
+    return chart_project.read_source_parts(p)
+}
+
+/// 导入 CSV（GET 兼容保留；仅 ASCII 安全值可用，前端不再使用）。
 #[api(method = "GET", path = "/api/v1/import")]
 pub fn import_csv(path str) str {
     return chart_project.read_source_parts(path)
 }
 
-/// 校验映射：类别列 + 数值列（v1..v3 可 -1）+ 全部所选单元格数值。
+/// 校验映射（POST）：类别列 + 数值列（v1..v3 可 -1）+ 全部所选单元格数值。
+/// body：{"path","index_col","v0","v1","v2","v3"}。
+#[api(method = "POST", path = "/api/v1/validate")]
+pub fn validate_mapping_post(payload str) str {
+    var data str = unwrap_payload(payload)
+    var pt = json.parse(data)
+    var p str = pt.path
+    var ic int = pt.index_col
+    var w0 int = pt.v0
+    var w1 int = pt.v1
+    var w2 int = pt.v2
+    var w3 int = pt.v3
+    var parts str = chart_project.read_source_parts(p)
+    var pp = json.parse(parts)
+    if pp.ok == false {
+        return parts
+    }
+    return chart_project.validate_rows(pp.rows_frag, pp.col_count, ic, w0, w1, w2, w3)
+}
+
+/// 校验映射（GET 兼容保留）。
 #[api(method = "GET", path = "/api/v1/validate")]
 pub fn validate_mapping(path str, index_col int, v0 int, v1 int, v2 int, v3 int) str {
     var parts str = chart_project.read_source_parts(path)
@@ -36,7 +88,23 @@ pub fn validate_mapping(path str, index_col int, v0 int, v1 int, v2 int, v3 int)
     return chart_project.validate_rows(pt.rows_frag, pt.col_count, index_col, v0, v1, v2, v3)
 }
 
-/// 保存工程（内嵌全量数据，删源后可重开；同名覆盖、异名冲突明确报错）。
+/// 保存工程（POST；内嵌全量数据，删源后可重开；同名覆盖、异名冲突明确
+/// 报错）。body：{"name","path","index_col","v0","v1","v2","v3"}。
+#[api(method = "POST", path = "/api/v1/save")]
+pub fn save_project_post(payload str) str {
+    var data str = unwrap_payload(payload)
+    var pt = json.parse(data)
+    var nm str = pt.name
+    var p str = pt.path
+    var ic int = pt.index_col
+    var w0 int = pt.v0
+    var w1 int = pt.v1
+    var w2 int = pt.v2
+    var w3 int = pt.v3
+    return chart_project.save_project(nm, p, ic, w0, w1, w2, w3)
+}
+
+/// 保存工程（GET 兼容保留）。
 #[api(method = "GET", path = "/api/v1/save")]
 pub fn save_project(name str, path str, index_col int, v0 int, v1 int, v2 int, v3 int) str {
     return chart_project.save_project(name, path, index_col, v0, v1, v2, v3)
@@ -48,14 +116,42 @@ pub fn list_projects() str {
     return chart_project.list_projects()
 }
 
-/// 单个工程（原始 v1 JSON；缺失/损坏明确报错）。
+/// 单个工程（POST）：body {"id": "..."}。id 可含中文（slug 保 CJK），
+/// 查询/路径链路会破坏，故走 body。
+#[api(method = "POST", path = "/api/v1/project_get")]
+pub fn get_project_post(payload str) str {
+    var data str = unwrap_payload(payload)
+    var pt = json.parse(data)
+    var gid str = pt.id
+    return chart_project.get_project(gid)
+}
+
+/// 单个工程（GET 兼容保留；仅 ASCII 安全 id 可用，前端不再使用）。
 #[api(method = "GET", path = "/api/v1/projects/:id")]
 pub fn get_project(id str) str {
     return chart_project.get_project(id)
 }
 
-/// 导出独立 SVG：project_id 非空走工程内嵌数据（删源后仍可导出）；
+/// 导出独立 SVG（POST）：project_id 非空走工程内嵌数据（删源后仍可导出）；
 /// 否则按 source path+映射现读现渲。out_path 空 → exports/<slug>.svg。
+/// body：{"project_id","path","name","index_col","v0","v1","v2","v3","out_path"}。
+#[api(method = "POST", path = "/api/v1/export")]
+pub fn export_svg_post(payload str) str {
+    var data str = unwrap_payload(payload)
+    var pt = json.parse(data)
+    var pid str = pt.project_id
+    var p str = pt.path
+    var nm str = pt.name
+    var ic int = pt.index_col
+    var w0 int = pt.v0
+    var w1 int = pt.v1
+    var w2 int = pt.v2
+    var w3 int = pt.v3
+    var op str = pt.out_path
+    return chart_project.export_svg(pid, p, nm, ic, w0, w1, w2, w3, op)
+}
+
+/// 导出独立 SVG（GET 兼容保留）。
 #[api(method = "GET", path = "/api/v1/export")]
 pub fn export_svg(project_id str, path str, name str, index_col int, v0 int, v1 int, v2 int, v3 int, out_path str) str {
     return chart_project.export_svg(project_id, path, name, index_col, v0, v1, v2, v3, out_path)

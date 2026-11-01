@@ -10,3 +10,251 @@ pub fn dc(a float) float {
 pub fn ds(a float) float {
     math.sin(a)
 }
+
+// CHARTS-002 T-02：十进制文本 → float（组件侧）。语法 [+-]?digits[.digits]
+// （整数部分必需，与后端 chart_project.parse_value 同式）；非法 → 0。
+// 动机：VM 轨 app→组件数据通道上 JSON 数字的小数形态会静默归零
+// （standalone-decision §6），组件改吃字符串单元并自行解析保真。
+pub fn parse_decimal(s str) float {
+    var t str = s.trim()
+    var n int = t.len()
+    if n == 0 {
+        return 0.0
+    }
+    var neg bool = false
+    var i int = 0
+    var c0 str = t.substr(0, 1)
+    if c0 == "+" {
+        i = 1
+    } else {
+        if c0 == "-" {
+            neg = true
+            i = 1
+        }
+    }
+    var int_part int = 0
+    var digits int = 0
+    var seen_dot bool = false
+    var frac float = 0.0
+    var frac_scale float = 1.0
+    var frac_digits int = 0
+    while i < n {
+        var c str = t.substr(i, 1)
+        var dv int = -1
+        if c == "0" {
+            dv = 0
+        }
+        if c == "1" {
+            dv = 1
+        }
+        if c == "2" {
+            dv = 2
+        }
+        if c == "3" {
+            dv = 3
+        }
+        if c == "4" {
+            dv = 4
+        }
+        if c == "5" {
+            dv = 5
+        }
+        if c == "6" {
+            dv = 6
+        }
+        if c == "7" {
+            dv = 7
+        }
+        if c == "8" {
+            dv = 8
+        }
+        if c == "9" {
+            dv = 9
+        }
+        if dv < 0 {
+            if c == "." {
+                if seen_dot {
+                    return 0.0
+                }
+                seen_dot = true
+                i = i + 1
+                continue
+            }
+            return 0.0
+        }
+        if seen_dot {
+            if frac_digits < 15 {
+                frac_scale = frac_scale * 10.0
+                var dvf float = dv
+                frac = frac + dvf / frac_scale
+                frac_digits = frac_digits + 1
+            }
+        } else {
+            int_part = int_part * 10 + dv
+            digits = digits + 1
+        }
+        i = i + 1
+    }
+    if digits == 0 {
+        return 0.0
+    }
+    var ipf float = int_part
+    var v float = ipf + frac
+    if neg {
+        v = 0.0 - v
+    }
+    return v
+}
+
+// CHARTS-002 T-02：v 是否在四槽集合内（组件列定位用，避开 List 索引）。
+pub fn in_set4(v int, a int, b int, c int, d int) bool {
+    if v == a {
+        return true
+    }
+    if v == b {
+        return true
+    }
+    if v == c {
+        return true
+    }
+    if v == d {
+        return true
+    }
+    return false
+}
+
+// CHARTS-002 T-02：刻度标签 = k·m·10^e 的整数重建串。VM float 为 f32
+// （standalone-decision §3 实测），k·step 的浮点路径经 %.8g 会输出
+// "0.00049999997" 类噪声；(k,m,e) 全整数重建与 float 宽度无关，
+// oracle 以同式整数重构对账。
+pub fn label_of_k(k int, m int, e int) str {
+    if k == 0 {
+        return "0"
+    }
+    var neg bool = false
+    var kk int = k
+    if kk < 0 {
+        neg = true
+        kk = 0 - kk
+    }
+    var mant int = kk * m
+    var digits str = mant.to_string()
+    var out str = ""
+    if e >= 0 {
+        out = digits
+        var z int = 0
+        while z < e {
+            out = out + "0"
+            z = z + 1
+        }
+    } else {
+        var ne int = 0 - e
+        var dl int = digits.len()
+        var padded str = digits
+        while dl <= ne {
+            padded = "0" + padded
+            dl = dl + 1
+        }
+        var ip int = dl - ne
+        var head str = padded.substr(0, ip)
+        var tail str = padded.substr(ip, dl - ip)
+        while tail.len() > 0 {
+            var lc str = tail.substr(tail.len() - 1, 1)
+            if lc == "0" {
+                tail = tail.substr(0, tail.len() - 1)
+            } else {
+                break
+            }
+        }
+        if tail == "" {
+            out = head
+        } else {
+            out = head + "." + tail
+        }
+    }
+    if neg {
+        out = "-" + out
+    }
+    return out
+}
+
+// CHARTS-002 T-02：由 step 反查阶梯档位（m∈{1,2,5}·10^e），相对容差
+// 1e-5（step 携带 f32 噪声）。后端 chart_project.at 持同式私有副本。
+pub fn step_e_of(step float) int {
+    var ee int = 0 - 12
+    while ee <= 12 {
+        var p10 float = 1.0
+        var zi int = 0
+        if ee >= 0 {
+            while zi < ee {
+                p10 = p10 * 10.0
+                zi = zi + 1
+            }
+        } else {
+            var ne2 int = 0 - ee
+            while zi < ne2 {
+                p10 = p10 / 10.0
+                zi = zi + 1
+            }
+        }
+        if step_me_match(step, 1, p10) {
+            return ee
+        }
+        if step_me_match(step, 2, p10) {
+            return ee
+        }
+        if step_me_match(step, 5, p10) {
+            return ee
+        }
+        ee = ee + 1
+    }
+    return 0
+}
+
+pub fn step_m_of(step float) int {
+    var ee int = 0 - 12
+    while ee <= 12 {
+        var p10 float = 1.0
+        var zi int = 0
+        if ee >= 0 {
+            while zi < ee {
+                p10 = p10 * 10.0
+                zi = zi + 1
+            }
+        } else {
+            var ne3 int = 0 - ee
+            while zi < ne3 {
+                p10 = p10 / 10.0
+                zi = zi + 1
+            }
+        }
+        if step_me_match(step, 1, p10) {
+            return 1
+        }
+        if step_me_match(step, 2, p10) {
+            return 2
+        }
+        if step_me_match(step, 5, p10) {
+            return 5
+        }
+        ee = ee + 1
+    }
+    return 1
+}
+
+fn step_me_match(step float, m int, p10 float) bool {
+    var mf float = m
+    var cand float = mf * p10
+    var diff float = cand - step
+    if diff < 0.0 {
+        diff = 0.0 - diff
+    }
+    var tol float = step * 0.00001
+    if tol < 0.0 {
+        tol = 0.0 - tol
+    }
+    if diff <= tol {
+        return true
+    }
+    return false
+}

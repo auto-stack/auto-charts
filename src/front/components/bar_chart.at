@@ -13,10 +13,11 @@
 // # Usage
 // bar-chart (data: .sales, index: "q", fields: ["a", "b"], type: "stacked") {}
 
+use chart_geom: parse_decimal, in_set4, label_of_k, step_m_of, step_e_of
 use stylekit.styles: hint_text, caption_text
 style legend_swatch = "w-3 h-3 shrink-0"
 
-widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors: List<str> = ["#2563eb", "#16a34a", "#d97706", "#dc2626"], axis: str = "auto", grid: bool = true, legend: bool = true, labels: List<str> = [], tooltip: bool = true, type: str = "grouped") {
+widget BarChart (keysText: List<str> = [], rowsText: List = [], index: str = "q", fields: List<str> = ["v"], colors: List<str> = ["#2563eb", "#16a34a", "#d97706", "#dc2626"], axis: str = "auto", grid: bool = true, legend: bool = true, labels: List<str> = [], tooltip: bool = true, type: str = "grouped") {
     msg { Init, Hover(int), Toggle(int) }
 
     model {
@@ -77,22 +78,56 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
         .Init -> {
             // ---- 域(type prop 直接选) + 符号值域:带符号 vmin/vmax,
             //      与后端导出 SVG 同一几何合同(y(v)=260-(v-vmin)/span*240,
-            //      刻度阶梯 {1,2,5}·10^k,基线 y0=y(0)) ----
-            var vmax int = 0
-            var vmin int = 0
-            if .type == "stacked" {
-                for d in .data {
-                    var cum int = 0
-                    for f in .fields {
-                        var vs1 str = (d[f]).to_string()
-                        var dot1 int = vs1.find(".")
-                        var v0 int = 0
-                        if dot1 >= 0 {
-                            v0 = vs1.substr(0, dot1).to_int()
-                        } else {
-                            v0 = vs1.to_int()
+            //      刻度阶梯 {1,2,5}·10^k,基线 y0=y(0))。
+            //      CHARTS-002 T-02:值域/刻度 float 双端统一;数据面改吃
+            //      rowsText(字符串单元,app 自 rows_frag 透传)+组件内
+            //      parse_decimal 解析——VM 轨 JSON 数字小数在数据通道归零
+            //      的框架缺口绕开(standalone-decision §6);列定位用
+            //      for-in+计数器(List 索引在册缺陷 F-8 规避) ----
+            var idxCol int = -1
+            var ccol0 int = -1
+            var ccol1 int = -1
+            var ccol2 int = -1
+            var ccol3 int = -1
+            var nk int = 0
+            for kk in .keysText {
+                if kk == .index {
+                    idxCol = nk
+                }
+                var fi int = 0
+                for ff in .fields {
+                    if ff == kk {
+                        if fi == 0 {
+                            ccol0 = nk
                         }
-                        cum = cum + v0
+                        if fi == 1 {
+                            ccol1 = nk
+                        }
+                        if fi == 2 {
+                            ccol2 = nk
+                        }
+                        if fi == 3 {
+                            ccol3 = nk
+                        }
+                    }
+                    fi = fi + 1
+                }
+                nk = nk + 1
+            }
+            var vmax float = 0.0
+            var vmin float = 0.0
+            var n int = 0
+            if .type == "stacked" {
+                for row in .rowsText {
+                    n = n + 1
+                    var cum float = 0.0
+                    var ci int = 0
+                    for cell in row {
+                        if in_set4(ci, ccol0, ccol1, ccol2, ccol3) {
+                            var vf float = parse_decimal(cell)
+                            cum = cum + vf
+                        }
+                        ci = ci + 1
                     }
                     if cum > vmax {
                         vmax = cum
@@ -102,72 +137,117 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                     }
                 }
             } else {
-                for d in .data {
-                    for f in .fields {
-                        var vs0 str = (d[f]).to_string()
-                        var dot0 int = vs0.find(".")
-                        var v int = 0
-                        if dot0 >= 0 {
-                            v = vs0.substr(0, dot0).to_int()
-                        } else {
-                            v = vs0.to_int()
+                for row in .rowsText {
+                    n = n + 1
+                    var ci2 int = 0
+                    for cell2 in row {
+                        if in_set4(ci2, ccol0, ccol1, ccol2, ccol3) {
+                            var v float = parse_decimal(cell2)
+                            if v > vmax {
+                                vmax = v
+                            }
+                            if v < vmin {
+                                vmin = v
+                            }
                         }
-                        if v > vmax {
-                            vmax = v
-                        }
-                        if v < vmin {
-                            vmin = v
-                        }
+                        ci2 = ci2 + 1
                     }
                 }
             }
-            var span int = vmax - vmin
-            if span <= 0 {
-                vmin = 0
-                vmax = 100
-                span = 100
+            var span float = vmax - vmin
+            if span <= 0.0 {
+                vmin = 0.0
+                vmax = 100.0
+                span = 100.0
             }
-            // ---- 刻度阶梯 {1,2,5}·10^k(与 chart_project.at 渲染器同式) ----
-            var raw int = span / 4
-            if raw < 1 {
-                raw = 1
-            }
-            var step int = 0
-            var base int = 1
+            // ---- 刻度阶梯 {1,2,5}·10^k(与 chart_project.at 渲染器同式;
+            //      k 可为负——span/4 < 1 时下探种子;1e-7 相对边界容差) ----
+            var raw float = span / 4.0
+            var rawm float = raw - raw / 10000000.0
+            var step float = 0.0
+            var base float = 1.0
             var guard int = 0
-            while step == 0 {
-                if base >= raw {
-                    step = base
-                }
-                if step == 0 {
-                    if base * 2 >= raw {
-                        step = base * 2
-                    }
-                }
-                if step == 0 {
-                    if base * 5 >= raw {
-                        step = base * 5
-                    }
-                }
-                base = base * 10
+            while base > rawm {
+                base = base / 10.0
                 guard = guard + 1
                 if guard > 12 {
+                    break
+                }
+            }
+            while step == 0.0 {
+                if base >= rawm {
                     step = base
+                }
+                if step == 0.0 {
+                    if base * 2.0 >= rawm {
+                        step = base * 2.0
+                    }
+                }
+                if step == 0.0 {
+                    if base * 5.0 >= rawm {
+                        step = base * 5.0
+                    }
+                }
+                base = base * 10.0
+                guard = guard + 1
+                if guard > 28 {
+                    step = base
+                }
+            }
+            // ---- 最低可见刻度档位(≥vmin 的最小 step 整倍数的档位号;
+            //      tick = k·step 乘法形式免连加漂移;标签 = label_of_k 整数
+            //      重构;无取整/无 float→int) ----
+            var lm int = step_m_of(step)
+            var le int = step_e_of(step)
+            var eps float = step / 1000000.0
+            var kLo float = 0.0
+            var kLoI int = 0
+            if vmin > 0.0 {
+                var tidx float = 0.0
+                var tidxI int = 0
+                var ga int = 0
+                while tidx * step < vmin - eps {
+                    tidx = tidx + 1.0
+                    tidxI = tidxI + 1
+                    ga = ga + 1
+                    if ga > 64 {
+                        break
+                    }
+                }
+                kLo = tidx
+                kLoI = tidxI
+            } else {
+                if vmin < 0.0 {
+                    var tidx2 float = 0.0
+                    var tidxI2 int = 0
+                    var gb int = 0
+                    while tidx2 * step > vmin + eps {
+                        tidx2 = tidx2 - 1.0
+                        tidxI2 = tidxI2 - 1
+                        gb = gb + 1
+                        if gb > 64 {
+                            break
+                        }
+                    }
+                    kLo = tidx2
+                    kLoI = tidxI2
                 }
             }
             // ---- 可见刻度(≤5 槽,自底向上填) ----
-            var m int = vmin / step
-            if vmin - m * step != 0 {
-                if vmin > 0 {
-                    m = m + 1
+            var count int = 0
+            var cidx float = kLo
+            var gcx int = 0
+            while cidx * step <= vmax + eps {
+                count = count + 1
+                cidx = cidx + 1.0
+                gcx = gcx + 1
+                if gcx > 64 {
+                    break
                 }
             }
-            var tickLo int = m * step
-            var count int = (vmax - tickLo) / step + 1
             if count > 5 {
                 count = 5
             }
-            var btk int = tickLo + (count - 1) * step
             var vminf float = vmin
             var spanf float = span
             var bottom float = 260.0
@@ -176,44 +256,48 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             var zf float = 0.0
             var y0 float = bottom - (zf - vminf) / spanf * spanpx
             .barBaseY = f"${y0}"
-            // 逐刻度 y 与网格路径(自顶 = 最高刻度 btk 向下;int 求值后
-            // 显式存储强转 float——几何纪律)
-            var gf float = btk
-            var gy4 float = bottom - (gf - vminf) / spanf * spanpx
-            var gv3 int = btk - step
-            var gv3f float = gv3
-            var gy3 float = bottom - (gv3f - vminf) / spanf * spanpx
-            var gv2 int = btk - step * 2
-            var gv2f float = gv2
-            var gy2 float = bottom - (gv2f - vminf) / spanf * spanpx
-            var gv1 int = btk - step * 3
-            var gv1f float = gv1
-            var gy1 float = bottom - (gv1f - vminf) / spanf * spanpx
-            var gv0 int = btk - step * 4
-            var gv0f float = gv0
-            var gy0 float = bottom - (gv0f - vminf) / spanf * spanpx
-            .barTick4 = f"${btk}"
+            // 逐刻度 y 与网格路径(自顶 = 最高档位向下;k·step 乘法形式;
+            // 标签 = label_of_k(档位号,m,e) 整数重构)
+            var kTop float = kLo
+            var kTopI int = kLoI
+            var gi2 int = 0
+            while gi2 < count - 1 {
+                kTop = kTop + 1.0
+                kTopI = kTopI + 1
+                gi2 = gi2 + 1
+            }
+            var btk float = kTop * step
+            var gy4 float = bottom - (btk - vminf) / spanf * spanpx
+            var gv3 float = (kTop - 1.0) * step
+            var gy3 float = bottom - (gv3 - vminf) / spanf * spanpx
+            var gv2 float = (kTop - 2.0) * step
+            var gy2 float = bottom - (gv2 - vminf) / spanf * spanpx
+            var gv1 float = (kTop - 3.0) * step
+            var gy1 float = bottom - (gv1 - vminf) / spanf * spanpx
+            var gv0 float = (kTop - 4.0) * step
+            var gy0 float = bottom - (gv0 - vminf) / spanf * spanpx
+            .barTick4 = label_of_k(kTopI, lm, le)
             var gp str = f"M40 ${gy4} H550"
             if count >= 2 {
-                .barTick3 = f"${gv3}"
+                .barTick3 = label_of_k(kTopI - 1, lm, le)
                 gp = gp + f" M40 ${gy3} H550"
             } else {
                 .barTick3 = ""
             }
             if count >= 3 {
-                .barTick2 = f"${gv2}"
+                .barTick2 = label_of_k(kTopI - 2, lm, le)
                 gp = gp + f" M40 ${gy2} H550"
             } else {
                 .barTick2 = ""
             }
             if count >= 4 {
-                .barTick1 = f"${gv1}"
+                .barTick1 = label_of_k(kTopI - 3, lm, le)
                 gp = gp + f" M40 ${gy1} H550"
             } else {
                 .barTick1 = ""
             }
             if count >= 5 {
-                .barTick0 = f"${gv0}"
+                .barTick0 = label_of_k(kTopI - 4, lm, le)
                 gp = gp + f" M40 ${gy0} H550"
             } else {
                 .barTick0 = ""
@@ -221,7 +305,6 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             .barGrid = gp
             var domainf float = span
 
-            var n int = .data.len()
             var nf float = n
             var slot float = 510.0 / nf
             var ks int = .fields.len()
@@ -230,7 +313,6 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             var barw float = inner / kf
             var cs = .colors
             var ccount int = cs.len()
-            var iname = .index
 
             // ---- 段记录:type prop 直接选(grouped 槽内并列/stacked 前缀和堆叠);
             //      498 M2:逐柱记录 {d,c,g}(组号 g 驱动分组 emphasis)入逐系列槽位 ----
@@ -240,23 +322,56 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             var out3 List = []
             var k = 0
             for f in .fields {
+                var colK int = -1
+                if k == 0 {
+                    colK = ccol0
+                }
+                if k == 1 {
+                    colK = ccol1
+                }
+                if k == 2 {
+                    colK = ccol2
+                }
+                if k == 3 {
+                    colK = ccol3
+                }
                 var i = 0
-                for d in .data {
+                for row in .rowsText {
+                    var cellK str = ""
+                    var before float = 0.0
+                    var ci3 int = 0
+                    for cell in row {
+                        if ci3 == colK {
+                            if colK >= 0 {
+                                cellK = cell
+                            }
+                        }
+                        if ci3 == ccol0 {
+                            if k > 0 {
+                                var vb0 float = parse_decimal(cell)
+                                before = before + vb0
+                            }
+                        }
+                        if ci3 == ccol1 {
+                            if k > 1 {
+                                var vb1 float = parse_decimal(cell)
+                                before = before + vb1
+                            }
+                        }
+                        if ci3 == ccol2 {
+                            if k > 2 {
+                                var vb2 float = parse_decimal(cell)
+                                before = before + vb2
+                            }
+                        }
+                        ci3 = ci3 + 1
+                    }
                     var xf float = 40.0 + i * slot + slot * 0.2
                     var rstr = ""
                     if .type == "stacked" {
                         // 前缀和底边:前面系列累计抬升;段跨越基线按符号取
                         // 顶/高(v≥0 段在基线上方,反之向下)
-                        var before int = 0
-                        var k2 = 0
-                        for f2 in .fields {
-                            if k2 < k {
-                                var v2 = d[f2]
-                                before = before + v2
-                            }
-                            k2 = k2 + 1
-                        }
-                        var vf float = d[f]
+                        var vf float = parse_decimal(cellK)
                         var beforef float = before
                         var allf float = vf + beforef
                         var ysegtop float = bottom - (allf - vminf) / domainf * spanpx
@@ -269,7 +384,7 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                         }
                         rstr = f"M${xf} ${rtopS} h${inner} v${rhS} h-${inner} Z"
                     } else {
-                        var vfg float = d[f]
+                        var vfg float = parse_decimal(cellK)
                         var ytop float = bottom - (vfg - vminf) / domainf * spanpx
                         var rtop float = ytop
                         var rh float = y0 - ytop
@@ -344,10 +459,20 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
             var outL List = []
             var nxt int = 0
             var i4 = 0
-            for d in .data {
+            for row4 in .rowsText {
+                var catL str = ""
+                var ci4 int = 0
+                for cell4 in row4 {
+                    if ci4 == idxCol {
+                        if idxCol >= 0 {
+                            catL = cell4
+                        }
+                    }
+                    ci4 = ci4 + 1
+                }
                 var tgt int = nxt * (n - 1) / den
                 if i4 == tgt && nxt < KL {
-                    outL.push(d[iname])
+                    outL.push(catL)
                     nxt = nxt + 1
                 }
                 i4 = i4 + 1
@@ -433,29 +558,78 @@ widget BarChart (data: List, index: str = "q", fields: List<str> = ["v"], colors
                 .xLab19 = sv19
             }
 
-            // ---- 命中竖带 + tooltip 内容(逐索引预计算) ----
+            // ---- 命中竖带 + tooltip 内容(逐索引预计算;单元原串展示) ----
+            var nm0 str = .fields[0]
+            if .labels.len() > 0 {
+                nm0 = .labels[0]
+            }
+            var nm1 str = ""
+            if .fields.len() > 1 {
+                nm1 = .fields[1]
+                if .labels.len() > 1 {
+                    nm1 = .labels[1]
+                }
+            }
+            var nm2 str = ""
+            if .fields.len() > 2 {
+                nm2 = .fields[2]
+                if .labels.len() > 2 {
+                    nm2 = .labels[2]
+                }
+            }
+            var nm3 str = ""
+            if .fields.len() > 3 {
+                nm3 = .fields[3]
+                if .labels.len() > 3 {
+                    nm3 = .labels[3]
+                }
+            }
             var outBands List = []
             var outTipTitle List = []
             var outTipBody List = []
             var i3 = 0
-            for d in .data {
+            for row5 in .rowsText {
                 outBands.push({ i: i3, s: f"w-[${slot}px] h-full flex-1" })
-                outTipTitle.push(d[iname])
+                var catT str = ""
                 var body = ""
-                var k3 = 0
-                for f5 in .fields {
-                    var name2 = .fields[k3]
-                    var lname2 = .labels
-                    if lname2.len() > k3 {
-                        name2 = lname2[k3]
+                var ci5 int = 0
+                for cell5 in row5 {
+                    if ci5 == idxCol {
+                        if idxCol >= 0 {
+                            catT = cell5
+                        }
                     }
-                    if body == "" {
-                        body = f"${name2} ${d[f5]}"
-                    } else {
-                        body = body + "\n" + f"${name2} ${d[f5]}"
+                    if ci5 == ccol0 {
+                        if body == "" {
+                            body = f"${nm0} ${cell5}"
+                        } else {
+                            body = body + "\n" + f"${nm0} ${cell5}"
+                        }
                     }
-                    k3 = k3 + 1
+                    if ci5 == ccol1 {
+                        if body == "" {
+                            body = f"${nm1} ${cell5}"
+                        } else {
+                            body = body + "\n" + f"${nm1} ${cell5}"
+                        }
+                    }
+                    if ci5 == ccol2 {
+                        if body == "" {
+                            body = f"${nm2} ${cell5}"
+                        } else {
+                            body = body + "\n" + f"${nm2} ${cell5}"
+                        }
+                    }
+                    if ci5 == ccol3 {
+                        if body == "" {
+                            body = f"${nm3} ${cell5}"
+                        } else {
+                            body = body + "\n" + f"${nm3} ${cell5}"
+                        }
+                    }
+                    ci5 = ci5 + 1
                 }
+                outTipTitle.push(catT)
                 outTipBody.push(body)
                 i3 = i3 + 1
             }

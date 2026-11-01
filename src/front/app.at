@@ -49,7 +49,14 @@ widget App {
         sampleMode bool = false
 
         // ---- 数据集(导入/工程/示例共用) ----
-        recs List = []                // 对象行(组件 data 契约)
+        recs List = []                // 对象行(line/area/donut 组件契约)
+        rowsText List = []            // 字符串单元行(bar-chart 专用透传;
+                                      // VM 轨 JSON 数字小数在数据通道归零,
+                                      // 组件改吃字符串+自解析,见决策稿 §6)
+        keysText List<str> = []       // 列键序(与 rowsText 配套)
+        chartEpoch int = 0            // bar-chart 调用位 key（PLAN-536/os-016
+                                      // 挂载身份：key 变化即重发子件 Init；
+                                      // 数据/映射变更时递增）
         headerRows List = []          // [{i,name,isIdx,isVal}] 映射 UI
         indexCol int = -1
         indexKey str = ""
@@ -93,10 +100,13 @@ widget App {
         .DoImport -> {
             .statusErr = false
             try {
-                // VM 轨 Http.post body 为 JSON 字符串（post_json 语义）；
-                // 路径统一正斜杠（Windows 接受且免反斜杠转义）
-                var pth = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
-                var resp = Http.get_json("/api/v1/import?path=" + pth)
+                // CHARTS-002 T-01：业务参数走 POST body（查询链路对 CJK/
+                // `+&#%` 值破坏，见决策稿 §2）；路径统一正斜杠后手工
+                // JSON 转义（VM 轨原样发送，vue 轨外壳端点内剥壳）
+                var pth = ("" + .csvPath).replace("\\", "/")
+                var ep = pth.replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+                var body = "{\"path\":\"" + ep + "\"}"
+                var resp = Http.post("/api/v1/import", body)
                 var obj = json.parse(resp)
                 if obj.ok == false {
                     .statusErr = true
@@ -105,6 +115,9 @@ widget App {
                     .statusMsg = "导入失败(" + obj.err_code + ") 行" + rown.to_string() + " 列" + coln.to_string() + ": " + obj.detail
                 } else {
                     .recs = json.parse(obj.recs_frag)
+                    .rowsText = json.parse(obj.rows_frag)
+                    .keysText = json.parse(obj.keys_frag)
+                    .chartEpoch = .chartEpoch + 1
                     var keys = json.parse(obj.keys_frag)
                     .indexCol = -1
                     .indexKey = ""
@@ -172,6 +185,21 @@ widget App {
                 out.push(d)
             }
             .recs = out
+            var rt List = []
+            rt.push(["Jan", "186", "80", "40"])
+            rt.push(["Feb", "305", "200", "90"])
+            rt.push(["Mar", "237", "120", "60"])
+            rt.push(["Apr", "73", "190", "110"])
+            rt.push(["May", "209", "130", "70"])
+            rt.push(["Jun", "214", "140", "85"])
+            .rowsText = rt
+            var kt List<str> = []
+            kt.push("m")
+            kt.push("desktop")
+            kt.push("mobile")
+            kt.push("tablet")
+            .keysText = kt
+            .chartEpoch = .chartEpoch + 1
             .indexCol = 0
             .indexKey = "m"
             .v0 = 1
@@ -235,14 +263,15 @@ widget App {
                 if .v0 >= 0 {
                     if .sampleMode == false {
                         try {
-                            var pth2 = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                            var pth2 = ("" + .csvPath).replace("\\", "/")
+                            var ep2 = pth2.replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
                             var ic2 = 0 + .indexCol
                             var w2 = 0 + .v0
                             var x2 = 0 + .v1
                             var y2 = 0 + .v2
                             var z2 = 0 + .v3
-                            var q2 = "/api/v1/validate?path=" + pth2 + "&index_col=" + ic2.to_string() + "&v0=" + w2.to_string() + "&v1=" + x2.to_string() + "&v2=" + y2.to_string() + "&v3=" + z2.to_string()
-                            var vresp = Http.get_json(q2)
+                            var q2 = "{\"path\":\"" + ep2 + "\",\"index_col\":" + ic2.to_string() + ",\"v0\":" + w2.to_string() + ",\"v1\":" + x2.to_string() + ",\"v2\":" + y2.to_string() + ",\"v3\":" + z2.to_string() + "}"
+                            var vresp = Http.post("/api/v1/validate", q2)
                             var vobj = json.parse(vresp)
                             if vobj.ok == false {
                                 .chartReady = false
@@ -252,6 +281,7 @@ widget App {
                                 .statusMsg = "映射无效(" + vobj.err_code + ") 行" + vrown.to_string() + " 列" + vcoln.to_string() + ": " + vobj.detail
                             } else {
                                 .chartReady = true
+                                .chartEpoch = .chartEpoch + 1
                                 .statusErr = false
                                 .statusMsg = "映射有效"
                             }
@@ -376,14 +406,15 @@ widget App {
                     if .v0 >= 0 {
                         if .sampleMode == false {
                             try {
-                                var pth3 = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                                var pth3 = ("" + .csvPath).replace("\\", "/")
+                                var ep3 = pth3.replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
                                 var ic3 = 0 + .indexCol
                                 var w3 = 0 + .v0
                                 var x3 = 0 + .v1
                                 var y3 = 0 + .v2
                                 var z3 = 0 + .v3
-                                var q3 = "/api/v1/validate?path=" + pth3 + "&index_col=" + ic3.to_string() + "&v0=" + w3.to_string() + "&v1=" + x3.to_string() + "&v2=" + y3.to_string() + "&v3=" + z3.to_string()
-                                var vresp2 = Http.get_json(q3)
+                                var q3 = "{\"path\":\"" + ep3 + "\",\"index_col\":" + ic3.to_string() + ",\"v0\":" + w3.to_string() + ",\"v1\":" + x3.to_string() + ",\"v2\":" + y3.to_string() + ",\"v3\":" + z3.to_string() + "}"
+                                var vresp2 = Http.post("/api/v1/validate", q3)
                                 var vobj2 = json.parse(vresp2)
                                 if vobj2.ok == false {
                                     .chartReady = false
@@ -393,6 +424,7 @@ widget App {
                                     .statusMsg = "映射无效(" + vobj2.err_code + ") 行" + vrown2.to_string() + " 列" + vcoln2.to_string() + ": " + vobj2.detail
                                 } else {
                                     .chartReady = true
+                                    .chartEpoch = .chartEpoch + 1
                                     .statusErr = false
                                     .statusMsg = "映射有效"
                                 }
@@ -420,15 +452,17 @@ widget App {
         }
         .DoSave -> {
             try {
-                var nm = ("" + .projName).replace("\"", "").replace("%", "%25").replace(" ", "%20")
-                var pth4 = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
+                // 工程名逐字传输（CH-02）：仅做 JSON 转义，不再剥引号/编码
+                var nm = ("" + .projName).replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+                var pth4 = ("" + .csvPath).replace("\\", "/")
+                var ep4 = pth4.replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
                 var ic4 = 0 + .indexCol
                 var w4 = 0 + .v0
                 var x4 = 0 + .v1
                 var y4 = 0 + .v2
                 var z4 = 0 + .v3
-                var q4 = "/api/v1/save?name=" + nm + "&path=" + pth4 + "&index_col=" + ic4.to_string() + "&v0=" + w4.to_string() + "&v1=" + x4.to_string() + "&v2=" + y4.to_string() + "&v3=" + z4.to_string()
-                var resp = Http.get_json(q4)
+                var q4 = "{\"name\":\"" + nm + "\",\"path\":\"" + ep4 + "\",\"index_col\":" + ic4.to_string() + ",\"v0\":" + w4.to_string() + ",\"v1\":" + x4.to_string() + ",\"v2\":" + y4.to_string() + ",\"v3\":" + z4.to_string() + "}"
+                var resp = Http.post("/api/v1/save", q4)
                 var obj = json.parse(resp)
                 if obj.ok == false {
                     .statusErr = true
@@ -460,14 +494,19 @@ widget App {
         }
         .OpenProject(id str) -> {
             try {
-                var gid = "" + id
-                var resp = Http.get_json("/api/v1/projects/" + gid)
+                // id 可含中文（slug 保 CJK）：POST body 传输
+                var gid = ("" + id).replace("\\", "\\\\").replace("\"", "\\\"")
+                var gbody = "{\"id\":\"" + gid + "\"}"
+                var resp = Http.post("/api/v1/project_get", gbody)
                 var obj = json.parse(resp)
                 if obj.ok == false {
                     .statusErr = true
                     .statusMsg = "打开失败(" + obj.err_code + "): " + obj.detail
                 } else {
                     .recs = json.parse(obj.recs_frag)
+                    .rowsText = json.parse(obj.rows_frag)
+                    .keysText = json.parse(obj.keys_frag)
+                    .chartEpoch = .chartEpoch + 1
                     var keys = json.parse(obj.keys_frag)
                     .csvPath = obj.source_path
                     .projName = obj.name
@@ -562,17 +601,19 @@ widget App {
         }
         .DoExport -> {
             try {
-                var pid = ("" + .currentProjectId).replace("%", "%25").replace(" ", "%20")
-                var pth5 = ("" + .csvPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
-                var nm5 = ("" + .projName).replace("\"", "").replace("%", "%25").replace(" ", "%20")
+                var pid = ("" + .currentProjectId).replace("\\", "\\\\").replace("\"", "\\\"")
+                var pth5 = ("" + .csvPath).replace("\\", "/")
+                var ep5 = pth5.replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+                var nm5 = ("" + .projName).replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
                 var ic5 = 0 + .indexCol
                 var w5 = 0 + .v0
                 var x5 = 0 + .v1
                 var y5 = 0 + .v2
                 var z5 = 0 + .v3
-                var out5 = ("" + .expPath).replace("\\", "/").replace("%", "%25").replace(" ", "%20")
-                var q5 = "/api/v1/export?project_id=" + pid + "&path=" + pth5 + "&name=" + nm5 + "&index_col=" + ic5.to_string() + "&v0=" + w5.to_string() + "&v1=" + x5.to_string() + "&v2=" + y5.to_string() + "&v3=" + z5.to_string() + "&out_path=" + out5
-                var resp = Http.get_json(q5)
+                var out5 = ("" + .expPath).replace("\\", "/")
+                var eo5 = out5.replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+                var q5 = "{\"project_id\":\"" + pid + "\",\"path\":\"" + ep5 + "\",\"name\":\"" + nm5 + "\",\"index_col\":" + ic5.to_string() + ",\"v0\":" + w5.to_string() + ",\"v1\":" + x5.to_string() + ",\"v2\":" + y5.to_string() + ",\"v3\":" + z5.to_string() + ",\"out_path\":\"" + eo5 + "\"}"
+                var resp = Http.post("/api/v1/export", q5)
                 var obj = json.parse(resp)
                 if obj.ok == false {
                     .statusErr = true
@@ -703,7 +744,7 @@ widget App {
                                 line-chart (data: .recs, index: .indexKey, fields: .fieldKeys, labels: .fieldLabels) {}
                             }
                             if .chartType == "bar" {
-                                bar-chart (data: .recs, index: .indexKey, fields: .fieldKeys, labels: .fieldLabels) {}
+                                bar-chart (key: .chartEpoch.to_string(), keysText: .keysText, rowsText: .rowsText, index: .indexKey, fields: .fieldKeys, labels: .fieldLabels) {}
                             }
                             if .chartType == "area" {
                                 area-chart (data: .recs, index: .indexKey, fields: .fieldKeys, labels: .fieldLabels) {}
