@@ -1,6 +1,6 @@
 ---
 plan_id: CHARTS-002
-status: drafting
+status: execution_done
 feature_name: "中文数据传输、小数图形与独立运行收口"
 author: [Codex]
 created_at: 2026-10-31
@@ -123,6 +123,9 @@ CH-01..06均owner_stage=work，T-04在既有门中使其可执行，拟补测试
 
 - stage: new | plan_id: CHARTS-002 | plan_revision: 1 | outcome: pass（仅有界 T-00 就绪，产品与双端验收未执行） | next: work/T-00（等待后续实施指令）。
 - 现有归档计划、Spec 与源码保持原样；旧验收只证明其冻结版本与已声明范围。应用提交/push 不升级 AutoOS 组合版本。
+- stage: work | plan_id: CHARTS-002 | plan_revision: r1 | outcome: pass（execution_done） | worktree: D:/autostack/auto-charts（main，Plan §2 单 clone 纪律） | branch: main | base_commit: e5e91a9 | code_commit: 061feb4 | dependency_revisions: auto CLI 0.1.0+plan-890-verified-r7-t19-5-g55c98c7（auto-man 1eeac78）；auto-web ec9c4ba（只读核对） | task_ids: T-00..T-05 | evidence: 决策稿 docs/plans/evidence/002/standalone-decision.md（§2 传输红绿/§3 f32 数值/§6 D1·D2·G-9 缺口/§7 假说闭合）；门：VM 43/43、Vue 14/14、probe_api 0 失败、导出几何 oracle 48/48（原始日志/JSON 本地 D:/autostack/plan-artifacts/plan-002/，不入仓） | blockers: 无 | next_responsible_role: review（T-06 独立复审 AC-06；merge 统一回归门归 review/merge 拥有，保持待办）
+- stage: goal | plan_id: CHARTS-002 | plan_revision: r1 | round: 1 | from: drafting | to: execution_done | status: execution_done | outcome: pass | worktree: D:/autostack/auto-charts | commit: 061feb4 | next: review
+- 目标授权记录：用户 /goal「完成计划002」= 全链授权（work 含本 Plan §2 单 clone/main 纪律的 worktree 约定、review、有界修复、merge），后续阶段继承，不再询问。
 
 ## 10. 待澄清事项
 
