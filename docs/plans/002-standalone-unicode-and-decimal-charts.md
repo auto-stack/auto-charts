@@ -6,7 +6,7 @@ author: [Codex]
 created_at: 2026-10-31
 updated_at: 2026-10-31
 plan_revision: 1
-current_step: 0
+current_step: 1
 total_steps: 8
 base_branch: main
 base_commit: a5aa170c564f22a42f7a518a6d02d28650f15d32
@@ -104,7 +104,8 @@ CH-01..06均owner_stage=work，T-04在既有门中使其可执行，拟补测试
 
 ## 8. 执行步骤
 
-- [ ] T-00（owner_stage=work；依赖001交付；AC-01/02/03）：完成传输/数值/启动全路径有界探针，冻结精度、预算及最小owner前置，不先重写CSV/HTTP栈。
+- [x] T-00（owner_stage=work；依赖001交付；AC-01/02/03）：完成传输/数值/启动全路径有界探针，冻结精度、预算及最小owner前置，不先重写CSV/HTTP栈。
+  [✅ 已完成 2026-11-01] 决策稿 `docs/plans/evidence/002/standalone-decision.md`。实测：服务端 POST JSON body 标量与 whole-body 单 str 形参均逐字 UTF-8（P2a/P3）；GET query `+`→空格、%XX latin-1 乱码、`&` 截断（P1b/c/d）；真 UI 红态两轨 CJK 路径导入均失败（vue=三重破坏；VM 运行时自行百分号编码——001「VM raw OK」已漂移）；`Http.post(url, record)` VM 轨退化句柄串（G-6a 复现）、vue 轨绿；冻结 POST+单 `payload str` whole-body+首字节剥壳设计。float 实测 f64 语义、`.to_string()`≈%.8g、0.001/0.002 可区分、`10000000.001→"10000000"`；拼接陷阱（无 to_string 输出位型）。三形态启动实测可用。001 probe 断言 `y="122.85713"` 已随运行时漂移（现 `122.85714`），T-04 改容差断言。
 - [ ] T-01（owner_stage=work；依赖T-00及真实必要前置；AC-02）：修前端/API传输接缝，先建立CH-02反例再实现、回放，保留v1工程。
 - [ ] T-02（owner_stage=work；依赖T-00；AC-03）：统一屏幕/导出的合法数值解释、域/基线/刻度，建立CH-03独立oracle并排除旧截断反例。
 - [ ] T-03（owner_stage=work；依赖T-00/01/02；AC-01/04）：收口正式独立准备/启动、错误分类、旧工程/失败恢复，不增加OS依赖。
