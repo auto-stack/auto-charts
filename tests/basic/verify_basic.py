@@ -369,9 +369,15 @@ def vm_check_screen_geo(d, fx, key):
 
 def verify_vm(fx, data_dir):
     mcp_port = pick_free_port(19520)
+    front_port = pick_free_port(17740)
+    back_port = pick_free_port(17760)
     # AUTO_VM_WITH_HTTP=1 → split 模式：真实 VM HTTP 后端（lazy back 孵化）
     # + VM 窗口（run_vm.rs PLAN-026 路径）；merged 模式无 HTTP 服务器。
+    # -F/-B 显式端口：框架启动按端口清场（util.rs kill_process_on_port，
+    # Plan 354）——缺省 17850/17851 会与并发会话的 VM 窗口互杀（CHARTS-002
+    # merge 期实录），隔离端口使多会话共存。
     env = {**os.environ, "AUTOUI_MCP_PORT": str(mcp_port),
+           "AUTO_FRONT_PORT": str(front_port), "AUTO_HTTP_PORT": str(back_port),
            "AUTO_CHARTS_DATA": data_dir, "AUTO_VM_WITH_HTTP": "1"}
     # 窗口启动是环境级 flake（desktop_mcp.py 同款：MCP 不 bind 时杀掉重拉）
     proc = None
@@ -381,7 +387,7 @@ def verify_vm(fx, data_dir):
             proc.kill()
             time.sleep(1.5)
         errlog = open(os.path.join(data_dir, "vm_window_stderr.log"), "ab")
-        proc = subprocess.Popen([AUTO_BIN, "run", "-r", "vm"], cwd=REPO, env=env,
+        proc = subprocess.Popen([AUTO_BIN, "run", "-r", "vm", "-F", str(front_port), "-B", str(back_port)], cwd=REPO, env=env,
                                 stdout=errlog, stderr=subprocess.STDOUT)
         ok = wait_mcp("http://localhost:%d/mcp" % mcp_port, timeout=45)
         if ok:
