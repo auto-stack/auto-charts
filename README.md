@@ -66,6 +66,6 @@ AutoOS 通过 [`apps/auto-charts`](https://github.com/auto-stack/auto-os/tree/ma
 
 ## 当前后续：独立运行、中文与小数
 
-[CHARTS-002：中文数据传输、小数图形与独立运行收口](docs/plans/002-standalone-unicode-and-decimal-charts.md) 已交付（2026-11-01，work 阶段）：中文/特殊字符路径与工程名经 POST body 逐字往返（决策稿 [standalone-decision](docs/plans/evidence/002/standalone-decision.md) §2）；小数/负值/零域·基线·刻度双端 float 统一，刻度标签 (k,m,e) 整数重构，独立几何 oracle 对账（VM 43/43、Vue 14/14、后端探针 0 失败）；正式独立启动与旧工程/失败保全收口（§4/§7）。VM 轨框架缺口 D1/D2（数字小数数据通道归零、子组件 Init 首挂语义）以字符串数据面 + `key:` 代际绕开，登记于决策稿 §6，owner auto-lang/auto-ui。canonical 规范增量（SD-01/SD-02）随 merge 落地。
+[CHARTS-002：中文数据传输、小数图形与独立运行收口](docs/plans/archived/002-standalone-unicode-and-decimal-charts.md) 已交付归档（2026-11-02，r1 全 8 任务）：中文/特殊字符路径与工程名经 POST body 逐字往返（决策稿 [standalone-decision](docs/plans/evidence/002/standalone-decision.md) §2）；小数/负值/零域·基线·刻度双端 float 统一，刻度标签 (k,m,e) 整数重构，独立几何 oracle 对账（VM 43/43、Vue 14/14、后端探针 0 失败）；正式独立启动与旧工程/失败保全收口（§4/§7）。VM 轨框架缺口 D1/D2（数字小数数据通道归零、子组件 Init 首挂语义）以字符串数据面 + `key:` 代际绕开，登记于决策稿 §6，owner auto-lang/auto-ui。canonical 规范已落地：[basic-capabilities](docs/specs/charts/basic-capabilities.md)（修订）+ [standalone-runtime](docs/specs/charts/standalone-runtime.md)（新增）。交付统一回归门：VM 43/43、Vue 14/14、probe 0 失败。
 
 [路线图](docs/roadmap-v0.6.md) · [现实现规范](docs/specs/charts/basic-capabilities.md)。应用单独运行验证后再由OS统一计划集成；Linux继续等待Nix＋COSMIC基础。
