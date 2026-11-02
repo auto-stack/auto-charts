@@ -197,11 +197,15 @@ fn digit_val(c str) int {
 }
 
 const DEC_ERR_SYNTAX = -2000000000.0
-const DEC_ERR_RANGE = -1999999999.0
+const DEC_ERR_RANGE = -1000000000.0
 
 /// 语法：trim 后 [+-]?digits[.digits]（无指数/内部空格，整数部分必需）；
-/// |值| ≤ 10,000,000。小数按 float（f64）解释：逐位累积至 15 位，其后
-/// 差异低于表示精度（决策稿 §3，不承诺任意精度）。违例返回哨兵。
+/// 值域 |v| < 10,000,000（≥ 1e7 拒绝，与 001 定点实现 operative 边界一致）。
+/// 小数按 float（VM=f32）解释：逐位累积至 15 位。F-1 修复（T-06 复审）：
+/// ① 两哨兵须 f32 可精确表示且相异（原 -1999999999 在 f32 进位到 -2e9，
+/// 与 SYNTAX 坍缩，err_value_range 不可达）；② 值域在精确十进制整数部分
+/// 上判定（int_part ≥ 1e7），先于 f32 舍入——预算内 9999999.5 不再被
+/// 进位到 1e7 后误拒。违例返回哨兵。
 pub fn parse_value(s str) float {
     var t str = s.trim()
     var n int = t.len()
@@ -258,16 +262,13 @@ pub fn parse_value(s str) float {
     if digits == 0 {
         return DEC_ERR_SYNTAX
     }
+    if int_part >= 10000000 {
+        return DEC_ERR_RANGE
+    }
     var ipf float = int_part
     var v float = ipf + frac
     if neg {
         v = 0.0 - v
-    }
-    if v >= 10000000.0 {
-        return DEC_ERR_RANGE
-    }
-    if v <= 0.0 - 10000000.0 {
-        return DEC_ERR_RANGE
     }
     return v
 }

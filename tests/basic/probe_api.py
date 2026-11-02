@@ -121,6 +121,27 @@ def main():
     check(vr.get("ok") is False and vr.get("err_code") == "err_cell", "bad cell rejected", vr)
     check(vr.get("err_row") == 3 and vr.get("err_col") == 1, "bad cell row/col", vr)
 
+    # 3b. 值预算边界（CHARTS-002 F-1 永久反例）：v ≥ 1e7 → err_value_range
+    #     （f32 哨兵坍缩曾使其误报 err_cell）；预算内 9999999.5 不因 f32
+    #     进位到 1e7 被拒（operative 边界：值 < 1e7 接受，与 001 定点一致）。
+    def boundary_case(cell):
+        pb = os.path.join(workdir, "budget_boundary.csv")
+        with open(pb, "w", encoding="utf-8", newline="") as f:
+            f.write("cat,v\nx," + cell + "\n")
+        return req("GET", "/api/v1/validate?path=" + q(pb) + "&index_col=0&v0=1&v1=-1&v2=-1&v3=-1")
+    for cellv, want_err in (("10000000", "err_value_range"), ("10000001", "err_value_range"),
+                            ("9999999", None), ("9999999.5", None), ("9999999.9", None),
+                            ("-9999999.99", None)):
+        rb = boundary_case(cellv)
+        if want_err is None:
+            check(rb.get("ok") is True, "budget inside accepts " + cellv, rb)
+        else:
+            check(rb.get("ok") is False and rb.get("err_code") == want_err,
+                  "budget boundary rejects %s with %s" % (cellv, want_err), rb)
+    rs = boundary_case("abc")
+    check(rs.get("err_code") == "err_cell" and rs.get("err_row") == 2 and rs.get("err_col") == 1,
+          "syntax stays err_cell (distinct from range)", rs)
+
     # 4. 形状错误（ragged 行）
     csv4 = os.path.join(workdir, "ragged.csv")
     with open(csv4, "w", encoding="utf-8") as f:
