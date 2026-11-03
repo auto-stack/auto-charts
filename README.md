@@ -69,3 +69,16 @@ AutoOS 通过 [`apps/auto-charts`](https://github.com/auto-stack/auto-os/tree/ma
 [CHARTS-002：中文数据传输、小数图形与独立运行收口](docs/plans/archived/002-standalone-unicode-and-decimal-charts.md) 已交付归档（2026-11-02，r1 全 8 任务）：中文/特殊字符路径与工程名经 POST body 逐字往返（决策稿 [standalone-decision](docs/plans/evidence/002/standalone-decision.md) §2）；小数/负值/零域·基线·刻度双端 float 统一，刻度标签 (k,m,e) 整数重构，独立几何 oracle 对账（VM 43/43、Vue 14/14、后端探针 0 失败）；正式独立启动与旧工程/失败保全收口（§4/§7）。VM 轨框架缺口 D1/D2（数字小数数据通道归零、子组件 Init 首挂语义）以字符串数据面 + `key:` 代际绕开，登记于决策稿 §6，owner auto-lang/auto-ui。canonical 规范已落地：[basic-capabilities](docs/specs/charts/basic-capabilities.md)（修订）+ [standalone-runtime](docs/specs/charts/standalone-runtime.md)（新增）。交付统一回归门：VM 43/43、Vue 14/14、probe 0 失败。
 
 [路线图](docs/roadmap-v0.6.md) · [现实现规范](docs/specs/charts/basic-capabilities.md)。应用单独运行验证后再由OS统一计划集成；Linux继续等待Nix＋COSMIC基础。
+
+## 主题（auto-os/PLAN-056 接入）
+
+本产品已接入 AutoUI **官方主题包**正式消费面（2026-11-03，PLAN-056 T-03）：
+
+- `vendor/themes` 为 UI 管理渠道发布的固定版本快照（`themes` 0.2.0，内容
+  digest `9fa07742dc68aa5377ae06cb2d966386002063f184c515b6c5dddf8a6bef838e`），
+  经 `pac.at` `dep themes` 消费；快照不可二次编辑、非第二权威源。
+- 主合同在 **auto-os/PLAN-056**：本产品 pac 无 `theme` 键 = **follow 宿主**；
+  `src/front/app.at` `design { theme: "Auto", mode: "light" }` 为独立默认腿
+  （无 dark_mode 位，静态 light 保现默认语义）；`use themes.themes: Auto`
+  注册收集链（C-11 合同）。图表 series 数据色为组件内容域豁免；VM HTTP
+  split、CSV 导入/列映射/工程保存导出原样。

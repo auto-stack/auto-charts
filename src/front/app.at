@@ -12,6 +12,22 @@
 // 0 不静默)；工程打开走内嵌数据(信任保存时已验映射,导出时服务端再验)。
 // 任一失败保留当前有效工程,只更新错误状态(AC-04)。
 
+// PLAN-056 T-03：官方主题包主题名导入（031 合同消费面——`dep themes` 声明
+// 使包可解析，本 use 把包内 pub 主题收进收集链；无此行 themes 树不注册，
+// design.theme/follow 宿主候选都会在 C-11 未注册拒绝）。
+use themes.themes: Auto
+
+// PLAN-056 T-03：主题设计默认（独立默认腿）。theme="Auto" 经 pac
+// `dep themes`（vendor/themes 固定快照）注册的官方树解析。本产品无
+// dark_mode 状态位/明暗切换，独立默认腿取静态 light（原无 theme 键、
+// token 类默认浅色语义不变）；桌面内宿主策略完整快照（family+mode）按
+// 031 full-host 语义整体接管（follow）。图表 series 数据色为图表组件内容
+// 域，不随主题映射染色；VM HTTP split 与数据身份原样。
+design {
+    theme: "Auto"
+    mode: "light"
+}
+
 style tab_btn = "px-3 py-2 text-sm rounded-md border bg-background hover:bg-accent"
 style tab_btn_primary = "px-3 py-2 text-sm rounded-md bg-primary text-primary-foreground"
 style section_label = "text-xs font-semibold text-muted-foreground uppercase tracking-wide"
